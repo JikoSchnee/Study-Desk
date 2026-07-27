@@ -1,0 +1,56 @@
+import { describe, expect, it } from "vitest";
+import { compareLexically, comparisonFromLLM, evaluationFromComparison } from "./answer-comparison";
+import type { Card } from "./types";
+
+const card: Card = {
+  id: "b935a7e4-3924-4480-9015-2b7f4e970971", question: "什么是 RAG？", questionVariants: [], answer: "检索候选资料\n基于资料生成回答", answerPoints: [
+    { id: "retrieve", content: "检索候选资料", hint: "", note: "" },
+    { id: "generate", content: "基于资料生成回答", hint: "", note: "" },
+  ], note: "", track: "Agent", tags: [], difficulty: 2, status: "review", createdAt: "", updatedAt: "",
+};
+
+describe("answer comparison", () => {
+  it("maps exact local wording to its answer point and leaves unrelated points missing", () => {
+    const comparison = compareLexically(card, "我会先检索候选资料，再说明业务背景。");
+    expect(comparison.source).toBe("lexical");
+    expect(comparison.points[0]).toMatchObject({ answerPointId: "retrieve", status: "covered" });
+    expect(comparison.points[0].evidence[0]).toMatchObject({ text: "我会先检索候选资料，再说明业务背景。", start: 0 });
+    expect(comparison.points[1].status).toBe("missing");
+    expect(evaluationFromComparison(comparison).score).toBe(50);
+  });
+
+  it("accepts only LLM evidence that occurs in the submitted answer", () => {
+    const comparison = comparisonFromLLM(card, "先检索候选资料，再基于资料生成回答。", { matches: [
+      { id: "retrieve", status: "covered", evidence: ["检索候选资料"] },
+      { id: "generate", status: "covered", evidence: ["基于资料生成回答"] },
+    ] });
+    expect(comparison.source).toBe("llm");
+    expect(comparison.points.every((point) => point.status === "covered")).toBe(true);
+    expect(() => comparisonFromLLM(card, "只有回答", { matches: [{ id: "retrieve", status: "covered", evidence: ["不存在的证据"] }] })).toThrow("可验证");
+  });
+
+  it("keeps a multi-sentence answer line together when matching an answer point", () => {
+    const answer = "检索候选资料。并说明召回阶段的目标。\n基于资料生成回答。避免脱离上下文。";
+    const comparison = compareLexically(card, answer);
+    expect(comparison.points[0].evidence[0].text).toBe("检索候选资料。并说明召回阶段的目标。");
+    expect(comparison.points[1].evidence[0].text).toBe("基于资料生成回答。避免脱离上下文。");
+  });
+
+  it("uses inline numbering as paragraph answer-point boundaries", () => {
+    const answer = "L1，检索候选资料。先覆盖相关上下文。L2，基于资料生成回答。避免脱离上下文。";
+    const comparison = compareLexically(card, answer);
+    expect(comparison.points[0].evidence[0].text).toBe("L1，检索候选资料。先覆盖相关上下文。");
+    expect(comparison.points[1].evidence[0].text).toBe("L2，基于资料生成回答。避免脱离上下文。");
+  });
+
+  it("combines neighboring sentences in an unnumbered paragraph without reusing evidence", () => {
+    const paragraphCard: Card = { ...card, answerPoints: [
+      { id: "plan", content: "先明确业务目标，再拆解执行步骤", hint: "", note: "" },
+      { id: "risk", content: "最后说明潜在风险", hint: "", note: "" },
+    ] };
+    const comparison = compareLexically(paragraphCard, "先明确业务目标。再拆解执行步骤。最后说明潜在风险。");
+    expect(comparison.points[0].evidence[0].text).toBe("先明确业务目标。再拆解执行步骤。");
+    expect(comparison.points[1].evidence[0].text).toBe("最后说明潜在风险。");
+    expect(comparison.points[0].evidence[0].end).toBeLessThanOrEqual(comparison.points[1].evidence[0].start);
+  });
+});

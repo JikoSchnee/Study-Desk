@@ -1,0 +1,11 @@
+node_modules
+.next
+.cache/
+Quizlet-Anki-资料/
+自建知识库与期末复习-竞品分析报告.md
+data/*.db
+data/*.db-*
+.env.local
+test-results
+playwright-report
+*.tsbuildinfo

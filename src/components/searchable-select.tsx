@@ -1,0 +1,115 @@
+"use client";
+
+import { KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";
+import { ChevronDown, X } from "lucide-react";
+import { appendUniqueValues, matchingOptions } from "@/lib/select-options";
+
+type CommonProps = {
+  options: string[];
+  placeholder: string;
+  ariaLabel: string;
+  allowCustom?: boolean;
+  emptyText?: string;
+  required?: boolean;
+  variant?: "form" | "filter";
+};
+
+type SingleProps = CommonProps & {
+  multiple?: false;
+  value: string;
+  onChange: (value: string) => void;
+};
+
+type MultipleProps = CommonProps & {
+  multiple: true;
+  value: string[];
+  onChange: (value: string[]) => void;
+};
+
+function MatchingLabel({ value, query }: { value: string; query: string }) {
+  const cleanQuery = query.trim();
+  const index = cleanQuery ? value.toLocaleLowerCase().indexOf(cleanQuery.toLocaleLowerCase()) : -1;
+  if (index < 0) return <>{value}</>;
+  const end = index + cleanQuery.length;
+  return <>{value.slice(0, index)}<mark>{value.slice(index, end)}</mark>{value.slice(end)}</>;
+}
+
+export function SearchableSelect(props: SingleProps | MultipleProps) {
+  const { options, placeholder, ariaLabel, allowCustom = false, emptyText = "没有匹配项", required = false, variant = "form" } = props;
+  const rootRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listboxId = useId();
+  const values = props.multiple ? props.value : props.value ? [props.value] : [];
+  const [query, setQuery] = useState(props.multiple ? "" : props.value);
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const matches = useMemo(() => matchingOptions(options, query, props.multiple ? props.value : []), [options, props.multiple, props.value, query]);
+
+  useEffect(() => {
+    if (!props.multiple) setQuery(props.value);
+  }, [props.multiple, props.value]);
+
+  useEffect(() => {
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (rootRef.current?.contains(event.target as Node)) return;
+      commitQuery();
+      setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
+  });
+
+  const selectSingle = (value: string) => {
+    if (props.multiple) return;
+    props.onChange(value);
+    setQuery(value);
+    setOpen(false);
+  };
+  const selectMultiple = (valuesToAdd: string[]) => {
+    if (!props.multiple) return;
+    props.onChange(appendUniqueValues(props.value, valuesToAdd));
+    setQuery("");
+    setActiveIndex(0);
+  };
+  const commitQuery = () => {
+    const candidate = query.trim();
+    if (!candidate) return;
+    if (props.multiple) {
+      const tokens = candidate.split(/[，,|]/).map((item) => item.trim()).filter(Boolean);
+      if (allowCustom) selectMultiple(tokens);
+      else if (matches[0]) selectMultiple([matches[0]]);
+      return;
+    }
+    if (allowCustom) selectSingle(candidate);
+    else if (matches[0]) selectSingle(matches[0]);
+    else setQuery(props.value);
+  };
+  const removeValue = (value: string) => {
+    if (!props.multiple) return;
+    props.onChange(props.value.filter((item) => item !== value));
+  };
+  const clearSingle = () => {
+    if (props.multiple) return;
+    props.onChange("");
+    setQuery("");
+    inputRef.current?.focus();
+  };
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowDown") { event.preventDefault(); setOpen(true); setActiveIndex((index) => Math.min(index + 1, Math.max(matches.length - 1, 0))); return; }
+    if (event.key === "ArrowUp") { event.preventDefault(); setOpen(true); setActiveIndex((index) => Math.max(index - 1, 0)); return; }
+    if (event.key === "Escape") { event.preventDefault(); setOpen(false); setQuery(props.multiple ? "" : props.value); return; }
+    if (event.key === "Enter") { event.preventDefault(); const active = matches[activeIndex]; if (active) { if (props.multiple) selectMultiple([active]); else selectSingle(active); } else commitQuery(); return; }
+    if (props.multiple && [",", "，", "|"].includes(event.key)) { event.preventDefault(); commitQuery(); }
+    if (props.multiple && event.key === "Backspace" && !query && props.value.length) removeValue(props.value.at(-1)!);
+  };
+
+  return <div className={`searchable-select ${variant} ${open ? "open" : ""}`} ref={rootRef}>
+    <div className="searchable-select-control" onMouseDown={(event) => { if (event.target === event.currentTarget) inputRef.current?.focus(); }}>
+      {props.multiple && values.map((value) => <span className="searchable-select-chip" key={value}>#{value}<button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => removeValue(value)} aria-label={`移除标签 ${value}`}><X size={13}/></button></span>)}
+      <input ref={inputRef} value={query} required={required} aria-label={ariaLabel} aria-autocomplete="list" aria-controls={listboxId} aria-expanded={open} role="combobox" placeholder={values.length && props.multiple ? "继续输入标签" : placeholder} onFocus={() => { setOpen(true); setActiveIndex(0); }} onChange={(event) => { const value = event.target.value; if (props.multiple && /[，,|]$/.test(value)) { selectMultiple(value.split(/[，,|]/).filter(Boolean)); return; } setQuery(value); setOpen(true); setActiveIndex(0); }} onKeyDown={handleKeyDown} onBlur={() => window.setTimeout(() => { if (!rootRef.current?.contains(document.activeElement)) { commitQuery(); setOpen(false); } }, 0)} />
+      {!props.multiple && props.value && <button type="button" className="searchable-select-clear" onMouseDown={(event) => event.preventDefault()} onClick={clearSingle} aria-label={`清除${ariaLabel}`}><X size={15}/></button>}
+      <ChevronDown className="searchable-select-arrow" size={17}/>
+    </div>
+    {open && <div className="searchable-select-menu" id={listboxId} role="listbox" aria-label={ariaLabel}>{matches.length ? matches.map((option, index) => <button type="button" role="option" aria-selected={index === activeIndex} className={index === activeIndex ? "active" : ""} key={option} onMouseDown={(event) => event.preventDefault()} onClick={() => props.multiple ? selectMultiple([option]) : selectSingle(option)}>{props.multiple && <span>+</span>}<MatchingLabel value={option} query={query}/></button>) : <p>{allowCustom && query.trim() ? `未找到匹配项，按 Enter 创建“${query.trim()}”` : emptyText}</p>}</div>}
+  </div>;
+}
