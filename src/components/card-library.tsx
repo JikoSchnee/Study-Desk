@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Archive, ArrowUpDown, CalendarClock, CheckCircle2, Clock3, Download, FilePlus2, LibraryBig, MessageSquareText, MoreHorizontal, PencilLine, Search, Sparkles, Tag, Trash2, Undo2, X } from "lucide-react";
 import { CardDetailsDialog } from "@/components/card-details-dialog";
 import { AnswerStructureEditor as AnswerPointsEditor, QuestionVariantsEditor, RelatedCardsEditor, TagRecommendations, useCardRecommendations } from "@/components/card-form-editors";
@@ -35,6 +35,35 @@ function compactReviewTime(value: string | null | undefined, future = false) {
 
 function targetsCardControl(target: EventTarget | null) {
   return target instanceof Element && Boolean(target.closest("button, a, input, select, textarea, label, summary, details, [data-card-interactive]"));
+}
+
+const cardTiltMediaQuery = "(hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference)";
+const cardTiltLimit = 5;
+
+function canTiltCard(event: ReactPointerEvent<HTMLElement>) {
+  return event.pointerType === "mouse" && window.matchMedia(cardTiltMediaQuery).matches;
+}
+
+function beginCardTilt(event: ReactPointerEvent<HTMLElement>) {
+  if (canTiltCard(event)) event.currentTarget.dataset.tilting = "true";
+}
+
+function updateCardTilt(event: ReactPointerEvent<HTMLElement>) {
+  if (!canTiltCard(event)) return;
+
+  const card = event.currentTarget;
+  const bounds = card.getBoundingClientRect();
+  const offsetX = (event.clientX - bounds.left) / bounds.width - .5;
+  const offsetY = (event.clientY - bounds.top) / bounds.height - .5;
+
+  card.style.setProperty("--card-rotate-x", `${-offsetY * cardTiltLimit * 2}deg`);
+  card.style.setProperty("--card-rotate-y", `${offsetX * cardTiltLimit * 2}deg`);
+}
+
+function resetCardTilt(event: ReactPointerEvent<HTMLElement>) {
+  delete event.currentTarget.dataset.tilting;
+  event.currentTarget.style.removeProperty("--card-rotate-x");
+  event.currentTarget.style.removeProperty("--card-rotate-y");
 }
 
 export function CardLibrary() {
@@ -168,6 +197,9 @@ export function CardLibrary() {
           aria-label={selectionMode ? `${card.question}，${selected ? "已选择" : "未选择"}。按 Enter 或空格切换选择。` : undefined}
           onClick={(event) => selectFromCardSurface(event, card.id)}
           onKeyDown={(event) => selectFromCardKeyboard(event, card.id)}
+          onPointerEnter={beginCardTilt}
+          onPointerMove={updateCardTilt}
+          onPointerLeave={resetCardTilt}
         >
           <div className="knowledge-card-top">
             <label className="card-select"><input type="checkbox" checked={selected} onChange={() => toggleSelected(card.id)} /> 选择</label>
