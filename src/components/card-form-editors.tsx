@@ -1,8 +1,9 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Check, Plus, Sparkles, Trash2, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowDown, ArrowUp, Check, Link2, Plus, Search, Sparkles, Tags, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui";
-import type { AnswerPoint, AnswerPointRole, QuestionVariant } from "@/lib/types";
+import type { AnswerPoint, AnswerPointRole, Card, CardRelation, CardRelationType, QuestionVariant } from "@/lib/types";
 
 function pointId() {
   const uuid = globalThis.crypto?.randomUUID?.();
@@ -38,4 +39,67 @@ export function QuestionVariantsEditor({ variants, candidates = [], onChange, on
   const dismissCandidate = (id: string) => onCandidatesChange?.(candidates.filter((item) => item.id !== id));
   const acceptCandidate = (item: QuestionVariant) => { if (!item.content.trim()) return; onChange([...variants, item]); dismissCandidate(item.id); };
   return <fieldset className="question-variants"><legend>{label}</legend><div className="variant-intro"><p>记录同一知识点的不同说法。它们共享答案与复习进度。</p>{onGenerate && <Button type="button" variant="secondary" className="ai-variant-button" disabled={busy} onClick={onGenerate}><Sparkles size={16}/>{busy ? "正在构思…" : "AI 补充 3 种问法"}</Button>}</div>{variants.length > 0 && <div className="variant-list">{variants.map((item, index) => <div className="variant-row" key={item.id}><span className={`variant-source ${item.source}`}>{item.source === "ai" ? "AI 补充" : "我的问法"}</span><input value={item.content} onChange={(event) => update(item.id, event.target.value)} placeholder="换一种方式问同一个知识点…" /><div className="point-controls"><button type="button" aria-label="上移问法" disabled={index === 0} onClick={() => move(index, -1)}><ArrowUp size={15}/></button><button type="button" aria-label="下移问法" disabled={index === variants.length - 1} onClick={() => move(index, 1)}><ArrowDown size={15}/></button><button type="button" aria-label="删除问法" onClick={() => onChange(variants.filter((entry) => entry.id !== item.id))}><Trash2 size={15}/></button></div></div>)}</div>}<Button type="button" variant="ghost" className="add-point" onClick={() => onChange([...variants, variant()])}><Plus size={16}/> 添加我的问法</Button>{candidates.length > 0 && <section className="ai-candidates"><div className="candidate-heading"><Sparkles size={17}/><div><strong>AI 候选问法</strong><p>确认它仍能用原答案回答，再逐条采纳。</p></div></div>{candidates.map((item) => <div className="candidate-row" key={item.id}><input value={item.content} onChange={(event) => updateCandidate(item.id, event.target.value)} aria-label="AI 候选问法" /><Button type="button" variant="secondary" onClick={() => acceptCandidate(item)}><Check size={15}/> 采纳</Button><button type="button" className="candidate-dismiss" aria-label="忽略候选问法" onClick={() => dismissCandidate(item.id)}><X size={16}/></button></div>)}</section>}</fieldset>;
+}
+
+type RecommendationDraft = { question: string; questionVariants: QuestionVariant[]; answerPoints: AnswerPoint[]; note: string; track: string; tags: string[] };
+type CardRecommendation = { cardId: string; question: string; track: string; score: number };
+
+export function useCardRecommendations(draft: RecommendationDraft, excludeId: string | undefined, relations: CardRelation[]) {
+  const [result, setResult] = useState<{ relatedCards: CardRecommendation[]; tags: string[] }>({ relatedCards: [], tags: [] });
+  const [state, setState] = useState<"idle" | "loading" | "error">("idle");
+  const serializedDraft = JSON.stringify(draft);
+  const excludedIds = JSON.stringify([excludeId, ...relations.map((relation) => relation.cardId)].filter((id): id is string => Boolean(id)).sort());
+  useEffect(() => {
+    if (draft.question.trim().length < 3) { setResult({ relatedCards: [], tags: [] }); setState("idle"); return; }
+    const controller = new AbortController();
+    const currentDraft = JSON.parse(serializedDraft) as RecommendationDraft;
+    const timer = window.setTimeout(async () => {
+      setState("loading");
+      try {
+        const response = await fetch("/api/cards/recommendations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ draft: currentDraft, excludeCardIds: JSON.parse(excludedIds) }), signal: controller.signal });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error);
+        setResult({ relatedCards: data.relatedCards ?? [], tags: data.tags ?? [] });
+        setState("idle");
+      } catch {
+        if (controller.signal.aborted) return;
+        setResult({ relatedCards: [], tags: [] });
+        setState("error");
+      }
+    }, 700);
+    return () => { controller.abort(); window.clearTimeout(timer); };
+  }, [draft.question, excludedIds, serializedDraft]);
+  return { ...result, state };
+}
+
+export function RelatedCardsEditor({ cards, value, onChange, excludeId, recommendations = [], recommendationState = "idle" }: { cards: Card[]; value: CardRelation[]; onChange: (relations: CardRelation[]) => void; excludeId?: string; recommendations?: CardRecommendation[]; recommendationState?: "idle" | "loading" | "error" }) {
+  const [query, setQuery] = useState("");
+  const choices = cards.filter((card) => card.id !== excludeId);
+  const selected = value.flatMap((relation) => {
+    const card = choices.find((item) => item.id === relation.cardId);
+    return card ? [{ card, relation }] : [];
+  });
+  const matches = choices.filter((card) => `${card.question} ${card.track} ${card.tags.join(" ")}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())).slice(0, 8);
+  const toggle = (id: string) => onChange(value.some((relation) => relation.cardId === id) ? value.filter((relation) => relation.cardId !== id) : [...value, { cardId: id, type: "related" }]);
+  const updateType = (cardId: string, type: CardRelationType) => onChange(value.map((relation) => relation.cardId === cardId ? { ...relation, type } : relation));
+  return <fieldset className="related-cards">
+    <legend><Link2 size={15}/> 关联问题</legend>
+    <p>语义推荐默认加入为相关问题；也可将本卡设为对方的父问题或子问题。每张卡的学习进度始终独立。</p>
+    {recommendationState === "loading" && <p className="recommendation-status">正在理解整张卡片内容并推荐关联问题…</p>}
+    {recommendationState === "error" && <p className="recommendation-status error">本地语义模型暂不可用；你仍可手动设置关联问题。</p>}
+    {recommendations.length > 0 && <div className="related-card-recommendations"><strong>语义推荐</strong>{recommendations.map((card) => <button type="button" key={card.cardId} onClick={() => toggle(card.cardId)}><Plus size={15}/><span>{card.question}</span><small>{card.score}% · {card.track}</small></button>)}</div>}
+    {choices.length ? <>
+      <label className="related-card-search"><Search size={16}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索已有问题、类型或标签" aria-label="搜索关联问题" /></label>
+      <div className="related-card-options" role="list" aria-label="可关联的问题">{matches.length ? matches.map((card) => {
+        const active = value.some((relation) => relation.cardId === card.id);
+        return <button type="button" className={active ? "selected" : ""} key={card.id} onClick={() => toggle(card.id)} aria-pressed={active}><span>{active ? <Check size={15}/> : <Plus size={15}/>}</span><strong>{card.question}</strong><small>{card.track}</small></button>;
+      }) : <p>没有匹配的问题。</p>}</div>
+      {selected.length > 0 && <div className="related-card-selection" aria-label="已关联的问题">{selected.map(({ card, relation }) => <div key={card.id}><strong>{card.question}</strong><select value={relation.type} onChange={(event) => updateType(card.id, event.target.value as CardRelationType)} aria-label={`${card.question} 的关系类型`}><option value="related">相关问题</option><option value="parent">本卡是父问题</option><option value="child">本卡是子问题</option></select><button type="button" onClick={() => toggle(card.id)} aria-label={`移除关联问题 ${card.question}`}><X size={13}/></button></div>)}</div>}
+    </> : <div className="related-card-empty">先保存至少一张其他卡片，才能在这里建立关联。</div>}
+  </fieldset>;
+}
+
+export function TagRecommendations({ tags, onAdd, state = "idle" }: { tags: string[]; onAdd: (tag: string) => void; state?: "idle" | "loading" | "error" }) {
+  if (!tags.length && state !== "loading") return null;
+  return <div className="tag-recommendations" aria-live="polite"><span><Tags size={14}/> {state === "loading" ? "正在推荐标签…" : "推荐标签"}</span>{tags.map((tag) => <button type="button" key={tag} onClick={() => onAdd(tag)}><Plus size={14}/>{tag}</button>)}</div>;
 }

@@ -3,7 +3,7 @@ import { compareLexically, comparisonFromLLM, evaluationFromComparison } from ".
 import type { Card } from "./types";
 
 const card: Card = {
-  id: "b935a7e4-3924-4480-9015-2b7f4e970971", question: "什么是 RAG？", questionVariants: [], answer: "检索候选资料\n基于资料生成回答", answerPoints: [
+  id: "b935a7e4-3924-4480-9015-2b7f4e970971", question: "什么是 RAG？", questionVariants: [], relations: [], answer: "检索候选资料\n基于资料生成回答", answerPoints: [
     { id: "retrieve", content: "检索候选资料", hint: "", note: "" },
     { id: "generate", content: "基于资料生成回答", hint: "", note: "" },
   ], note: "", track: "Agent", tags: [], difficulty: 2, status: "review", createdAt: "", updatedAt: "",

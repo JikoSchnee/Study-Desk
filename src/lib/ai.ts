@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { modelProviders, type ModelProviderId, type ModelProtocol } from "@/lib/model-providers";
 import { normalizeQuestion } from "@/lib/question-variants";
 import { compareWithEmbeddings, comparisonFromLLM, evaluationFromComparison } from "@/lib/answer-comparison";
-import type { AnswerComparisonMode, Card, Evaluation } from "@/lib/types";
+import type { AnswerComparisonMode, AnswerPoint, Card, CardRelationType, Evaluation, FollowUpCardDraft, QuestionVariant } from "@/lib/types";
 
 export interface LLMProvider { evaluateAnswer(card: Card, answer: string): Promise<Evaluation>; }
 export interface SpeechToTextProvider { transcribe(audio: Blob): Promise<string>; }
@@ -135,5 +135,68 @@ export async function generateFollowUpQuestion(card: Card, answer: string, gaps:
     return question.trim();
   } catch (error) {
     throw new Error(error instanceof Error ? error.message : "暂时无法生成追问。");
+  }
+}
+
+type FollowUpCardContext = { answer?: string; gaps?: string[] };
+type GeneratedAnswerPoint = { content?: unknown; hint?: unknown; note?: unknown; role?: unknown };
+
+function relationTypeFromSource(value: unknown): CardRelationType {
+  if (value === "source_parent") return "child";
+  if (value === "source_child") return "parent";
+  return "related";
+}
+
+export function parseGeneratedFollowUpCardDraft(content: string, card: Card, followUpQuestion: string): FollowUpCardDraft {
+  const data = JSON.parse(content) as { answerPoints?: unknown; questionVariants?: unknown; note?: unknown; track?: unknown; tags?: unknown; relationToSource?: unknown };
+  if (!Array.isArray(data.answerPoints)) throw new Error("模型没有返回追问卡的答案要点。");
+  const answerPoints: AnswerPoint[] = data.answerPoints.flatMap((value) => {
+    const record: GeneratedAnswerPoint = typeof value === "string" ? { content: value } : value && typeof value === "object" ? value as GeneratedAnswerPoint : {};
+    const content = typeof record.content === "string" ? record.content.trim() : "";
+    if (!content) return [];
+    return [{ id: randomUUID(), content, hint: typeof record.hint === "string" ? record.hint.trim() : "", note: typeof record.note === "string" ? record.note.trim() : "", role: record.role === "opening" || record.role === "closing" ? record.role : "key" }];
+  });
+  if (!answerPoints.some((point) => point.role === "key")) throw new Error("模型没有返回可用的核心答案要点。");
+  const seenVariants = new Set([normalizeQuestion(followUpQuestion)]);
+  const questionVariants: QuestionVariant[] = (Array.isArray(data.questionVariants) ? data.questionVariants : []).flatMap((value) => {
+    if (typeof value !== "string") return [];
+    const item = value.trim().replace(/\s+/g, " ");
+    const key = normalizeQuestion(item);
+    if (item.length < 3 || seenVariants.has(key)) return [];
+    seenVariants.add(key);
+    return [{ id: randomUUID(), content: item, source: "ai" as const }];
+  }).slice(0, 3);
+  const seenTags = new Set<string>();
+  const tags = (Array.isArray(data.tags) ? data.tags : []).flatMap((value) => {
+    if (typeof value !== "string") return [];
+    const tag = value.trim();
+    const key = tag.toLocaleLowerCase();
+    if (!tag || seenTags.has(key)) return [];
+    seenTags.add(key);
+    return [tag];
+  }).slice(0, 8);
+  return {
+    question: followUpQuestion.trim(), questionVariants, answerPoints,
+    note: typeof data.note === "string" && data.note.trim() ? data.note.trim() : "由 AI 根据追问上下文生成；保存前请核对准确性。",
+    track: typeof data.track === "string" && data.track.trim() ? data.track.trim() : card.track,
+    tags: tags.length ? tags : card.tags,
+    sourceCardId: card.id,
+    relationType: relationTypeFromSource(data.relationToSource),
+  };
+}
+
+export async function generateFollowUpCardDraft(card: Card, followUpQuestion: string, context: FollowUpCardContext = {}) {
+  const config = remoteModelConfig();
+  if (!config) throw new Error("请先在设置中配置模型服务，再将 AI 追问加入卡片库。");
+  try {
+    const content = await requestModel(config, {
+      temperature: 0.3,
+      jsonMode: true,
+      system: "你是严谨的中文技术面试题编辑。基于原卡和已生成的追问，生成一张可独立学习的追问卡草稿。只返回 JSON：{\"answerPoints\":[{\"content\":\"...\",\"hint\":\"...\",\"note\":\"...\",\"role\":\"key\"}],\"questionVariants\":[\"...\"],\"note\":\"...\",\"track\":\"...\",\"tags\":[\"...\"],\"relationToSource\":\"source_parent|source_child|related\"}。必须返回至少一条核心答案要点；不得改写追问本身，不得把候选人的错误回答当作事实。source_parent 表示原卡是本卡的父问题，source_child 表示原卡是本卡的子问题，related 表示普通相关。",
+      user: `原卡主问题：${card.question}\n原卡其他问法：${card.questionVariants.map((item) => item.content).join("；") || "无"}\n原卡答案要点：${card.answerPoints.map((item) => item.content).join("；")}\n原卡备注：${card.note || "无"}\n原卡知识库类型：${card.track}\n原卡标签：${card.tags.join("、") || "无"}\n已生成追问（必须作为新卡主问题）：${followUpQuestion}\n候选人本次回答：${context.answer?.trim() || "无"}\n识别到的遗漏：${context.gaps?.filter(Boolean).join("；") || "无"}`,
+    });
+    return parseGeneratedFollowUpCardDraft(content, card, followUpQuestion);
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : "暂时无法生成追问卡草稿。");
   }
 }

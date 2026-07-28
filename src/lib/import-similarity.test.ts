@@ -12,6 +12,7 @@ const card = (question: string): Card => ({
   id: "existing-rerank",
   question,
   questionVariants: [],
+  relations: [],
   answer: "通过重排序提高相关性",
   answerPoints: [],
   note: "",

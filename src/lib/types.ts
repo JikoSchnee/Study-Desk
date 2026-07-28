@@ -21,10 +21,29 @@ export interface QuestionVariant {
   source: "manual" | "ai";
 }
 
+export type CardRelationType = "related" | "parent" | "child";
+
+export interface CardRelation {
+  cardId: string;
+  type: CardRelationType;
+}
+
+export interface FollowUpCardDraft {
+  question: string;
+  questionVariants: QuestionVariant[];
+  answerPoints: AnswerPoint[];
+  note: string;
+  track: string;
+  tags: string[];
+  sourceCardId: string;
+  relationType: CardRelationType;
+}
+
 export interface Card {
   id: string;
   question: string;
   questionVariants: QuestionVariant[];
+  relations: CardRelation[];
   answer: string;
   answerPoints: AnswerPoint[];
   note: string;

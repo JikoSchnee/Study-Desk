@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect } from "react";
-import { CalendarClock, ChartNoAxesCombined, CircleCheckBig, ClipboardCheck, Clock3, GraduationCap, History, MessageSquareText, X } from "lucide-react";
+import { CalendarClock, ChartNoAxesCombined, CircleCheckBig, ClipboardCheck, Clock3, GraduationCap, History, Link2, MessageSquareText, X } from "lucide-react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { AnswerComparisonView } from "@/components/answer-comparison";
 import { difficultyTier } from "@/lib/card-filters";
-import type { AnswerPoint, AnswerPointRole, Card, CardLearningDetails, RatingName } from "@/lib/types";
+import type { AnswerPoint, AnswerPointRole, Card, CardLearningDetails, CardRelationType, RatingName } from "@/lib/types";
 
 const ratingLabel: Record<RatingName, string> = { again: "忘记", hard: "困难", good: "良好", easy: "轻松" };
 const answerSectionLabel: Record<AnswerPointRole, string> = { opening: "开场总述", key: "核心要点", closing: "收束总结" };
@@ -54,7 +54,7 @@ function StudyTooltip({ active, payload, kind }: { active?: boolean; payload?: A
   return <div className="study-chart-tooltip"><strong>{item.fullDate}</strong><span>{kind === "score" ? `${item.isInitial ? "首次练习" : "复习"} · ${item.score} 分 · ${ratingLabel[item.rating]}` : `下次间隔：${intervalLabel(item.interval)}`}</span></div>;
 }
 
-export function CardDetailsDialog({ card, learning, onClose }: { card: Card; learning: CardLearningDetails; onClose: () => void }) {
+export function CardDetailsDialog({ card, relatedCards, learning, onClose }: { card: Card; relatedCards: Array<Card & { relationType: CardRelationType }>; learning: CardLearningDetails; onClose: () => void }) {
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
     window.addEventListener("keydown", closeOnEscape);
@@ -79,6 +79,8 @@ export function CardDetailsDialog({ card, learning, onClose }: { card: Card; lea
   })).filter((item) => item.interval !== null);
   const tier = difficultyTier(learning.fsrsDifficulty);
   const difficulty = learning.fsrsDifficulty === null ? "待首次练习" : `${tier?.label ?? "—"} · ${learning.fsrsDifficulty.toFixed(1)} / 10`;
+  const relationLabel: Record<CardRelationType, string> = { parent: "父问题", child: "子问题", related: "相关问题" };
+  const relatedGroups = (["parent", "child", "related"] as CardRelationType[]).map((type) => ({ type, cards: relatedCards.filter((item) => item.relationType === type) })).filter((group) => group.cards.length);
   return <div className="card-editor-backdrop card-details-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <section className="card-editor-modal card-details-modal" role="dialog" aria-modal="true" aria-labelledby="card-details-title">
       <div className="card-editor-heading card-details-heading">
@@ -101,7 +103,7 @@ export function CardDetailsDialog({ card, learning, onClose }: { card: Card; lea
           {intervalData.length ? <div className="study-chart interval-chart"><ResponsiveContainer width="100%" height={210}><LineChart data={intervalData} margin={{ top: 16, right: 14, bottom: 0, left: -18 }}><CartesianGrid vertical={false} stroke="#cdeafa" strokeDasharray="4 5"/><XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "#718176", fontSize: 11, fontWeight: 800 }} dy={8}/><YAxis axisLine={false} tickLine={false} tick={{ fill: "#718176", fontSize: 11, fontWeight: 800 }} tickFormatter={(value) => intervalLabel(Number(value))} width={42}/><Tooltip cursor={{ stroke: "#54b6e6", strokeWidth: 2, strokeDasharray: "4 4" }} content={<StudyTooltip kind="interval"/>}/><Line type="monotone" dataKey="interval" stroke="#269fd8" strokeWidth={4} dot={{ r: 5, fill: "#fff", stroke: "#269fd8", strokeWidth: 3 }} activeDot={{ r: 7, fill: "#269fd8", stroke: "#fff", strokeWidth: 3 }}/></LineChart></ResponsiveContainer></div> : <div className="curve-empty">历史记录尚未保存排程间隔；从今后复习开始累积。</div>}
         </section>
         <section className="latest-practice" aria-label="最近一次完整练习记录"><div className="curve-heading"><div><p className="eyebrow">最近一次</p><h3>练习回放</h3></div><span className="curve-chip blue"><ClipboardCheck size={15}/> {learning.latestPractice?.isInitial ? "首次练习" : "复习记录"}</span></div>{learning.latestPractice ? <div className="latest-practice-body"><div className="practice-question"><p className="eyebrow">当次问题</p><strong>{learning.latestPractice.presentedQuestion ?? "此旧记录未保存当次题面。"}</strong><small>{exactTime(learning.latestPractice.reviewedAt)}</small></div><div className="practice-status-grid"><div><span>本次得分</span><strong>{learning.latestPractice.score} 分</strong></div><div><span>建议状态</span><strong>{ratingLabel[learning.latestPractice.suggestedRating]}</strong></div><div><span>确认状态</span><strong>{ratingLabel[learning.latestPractice.confirmedRating]}</strong></div><div><span>下次复习</span><strong>{relativeTime(learning.latestPractice.nextReviewAt, true)}</strong></div></div><div className="practice-feedback"><MessageSquareText size={18}/><div><p className="eyebrow">练习评价</p><p>{learning.latestPractice.feedback ?? "此旧记录未保存文字评价。"}</p></div></div>{learning.latestPractice.comparison ? <AnswerComparisonView comparison={learning.latestPractice.comparison} answer={learning.latestPractice.response}/> : <div className="practice-record-missing">此旧记录未保存答案对照。已保留当次作答：<p>{learning.latestPractice.response}</p></div>}</div> : <div className="curve-empty">完成首次练习并确认记忆状态后，这里会保留完整回放。</div>}</section>
-        <section className="detail-content"><AnswerPointSummary points={card.answerPoints}/>{card.questionVariants.length > 0 && <div><p className="eyebrow">其他问法</p><ul>{card.questionVariants.map((item) => <li key={item.id}>{item.content}</li>)}</ul></div>}{card.note && <div><p className="eyebrow">学习备注</p><p>{card.note}</p></div>}</section>
+        <section className="detail-content"><AnswerPointSummary points={card.answerPoints}/>{relatedGroups.length > 0 && <div className="detail-related-cards"><p className="eyebrow"><Link2 size={14}/> 关联问题</p>{relatedGroups.map((group) => <section key={group.type}><strong>{relationLabel[group.type]}</strong><ul>{group.cards.map((item) => <li key={item.id}><b>{item.question}</b><small>{item.track}</small></li>)}</ul></section>)}</div>}{card.questionVariants.length > 0 && <div><p className="eyebrow">其他问法</p><ul>{card.questionVariants.map((item) => <li key={item.id}>{item.content}</li>)}</ul></div>}{card.note && <div><p className="eyebrow">学习备注</p><p>{card.note}</p></div>}</section>
       </div>
     </section>
   </div>;

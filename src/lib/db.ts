@@ -13,6 +13,7 @@ if (process.env.NODE_ENV !== "production") globalForDb.mockInterviewDb = sqlite;
 sqlite.pragma("busy_timeout = 5000");
 sqlite.exec(`
   CREATE TABLE IF NOT EXISTS cards (id TEXT PRIMARY KEY, question TEXT NOT NULL, question_variants TEXT NOT NULL DEFAULT '[]', answer TEXT NOT NULL, answer_points TEXT NOT NULL DEFAULT '[]', note TEXT NOT NULL DEFAULT '', track TEXT NOT NULL, tags TEXT NOT NULL, difficulty INTEGER NOT NULL, source TEXT, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS card_relations (card_id TEXT NOT NULL, related_card_id TEXT NOT NULL, relation_type TEXT NOT NULL DEFAULT 'related', created_at TEXT NOT NULL, PRIMARY KEY (card_id, related_card_id));
   CREATE TABLE IF NOT EXISTS review_state (card_id TEXT PRIMARY KEY, fsrs_card TEXT NOT NULL, due_at TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS review_logs (id TEXT PRIMARY KEY, card_id TEXT NOT NULL, response TEXT NOT NULL, ai_score INTEGER NOT NULL, suggested_rating TEXT NOT NULL, confirmed_rating TEXT NOT NULL, comparison_mode TEXT, answer_comparison TEXT, presented_question TEXT, feedback TEXT, next_due_at TEXT, is_initial INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS daily_plans (date TEXT PRIMARY KEY, budget_minutes INTEGER NOT NULL, created_at TEXT NOT NULL);
@@ -37,6 +38,7 @@ function ensureColumn(table: string, column: string, definition: string) {
 ensureColumn("cards", "answer_points", "TEXT NOT NULL DEFAULT '[]'");
 ensureColumn("cards", "question_variants", "TEXT NOT NULL DEFAULT '[]'");
 ensureColumn("cards", "note", "TEXT NOT NULL DEFAULT ''");
+ensureColumn("card_relations", "relation_type", "TEXT NOT NULL DEFAULT 'related'");
 ensureColumn("review_logs", "comparison_mode", "TEXT");
 ensureColumn("review_logs", "answer_comparison", "TEXT");
 ensureColumn("review_logs", "presented_question", "TEXT");

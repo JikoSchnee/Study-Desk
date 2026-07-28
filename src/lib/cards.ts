@@ -5,35 +5,71 @@ import { parseTags, toTags } from "@/lib/utils";
 import { answerFromPoints, answerPointsFromStored, answerPointsToJson, hasCoreAnswerPoint, previewImport } from "@/lib/import";
 import { allQuestionTexts, findQuestionCollision, normalizeQuestionVariants, questionVariantsFromStored, questionVariantsToJson } from "@/lib/question-variants";
 import { findSimilarImportQuestions } from "@/lib/import-similarity";
-import type { AnswerPoint, Card, CardStatus, QuestionVariant } from "@/lib/types";
+import { normalizeCardRelations, reciprocalRelationType } from "@/lib/card-relations";
+import type { AnswerPoint, Card, CardRelation, CardStatus, QuestionVariant } from "@/lib/types";
 
-type CardRow = Omit<Card, "tags" | "createdAt" | "updatedAt" | "answerPoints" | "questionVariants"> & { answer_points?: string; question_variants?: string; note?: string; tags: string; created_at: string; updated_at: string };
+type CardRow = Omit<Card, "tags" | "createdAt" | "updatedAt" | "answerPoints" | "questionVariants" | "relations"> & { answer_points?: string; question_variants?: string; note?: string; tags: string; created_at: string; updated_at: string };
 
-function mapCard(row: CardRow): Card {
+function mapCard(row: CardRow, relations: CardRelation[] = []): Card {
   return {
-    id: row.id, question: row.question, questionVariants: normalizeQuestionVariants(row.question, questionVariantsFromStored(row.question_variants)), answer: row.answer, answerPoints: answerPointsFromStored(row.answer_points, row.answer), note: row.note ?? "", track: row.track, tags: parseTags(row.tags), difficulty: row.difficulty,
+    id: row.id, question: row.question, questionVariants: normalizeQuestionVariants(row.question, questionVariantsFromStored(row.question_variants)), relations, answer: row.answer, answerPoints: answerPointsFromStored(row.answer_points, row.answer), note: row.note ?? "", track: row.track, tags: parseTags(row.tags), difficulty: row.difficulty,
     source: row.source, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at,
   };
 }
 
+function relationsByCardId() {
+  const rows = sqlite.prepare("SELECT card_id, related_card_id, relation_type FROM card_relations").all() as Array<{ card_id: string; related_card_id: string; relation_type?: string }>;
+  return rows.reduce((result, row) => {
+    const related = result.get(row.card_id) ?? [];
+    related.push({ cardId: row.related_card_id, type: row.relation_type === "parent" || row.relation_type === "child" ? row.relation_type : "related" });
+    result.set(row.card_id, related);
+    return result;
+  }, new Map<string, CardRelation[]>());
+}
+
 export function listCards(): Card[] {
-  return (sqlite.prepare("SELECT * FROM cards ORDER BY updated_at DESC").all() as CardRow[]).map(mapCard);
+  const related = relationsByCardId();
+  return (sqlite.prepare("SELECT * FROM cards ORDER BY updated_at DESC").all() as CardRow[]).map((row) => mapCard(row, related.get(row.id)));
 }
 
 export function getCard(id: string): Card | undefined {
   const row = sqlite.prepare("SELECT * FROM cards WHERE id = ?").get(id) as CardRow | undefined;
-  return row ? mapCard(row) : undefined;
+  if (!row) return undefined;
+  const related = sqlite.prepare("SELECT related_card_id, relation_type FROM card_relations WHERE card_id = ? ORDER BY created_at DESC").all(id) as Array<{ related_card_id: string; relation_type?: string }>;
+  return mapCard(row, related.map((item) => ({ cardId: item.related_card_id, type: item.relation_type === "parent" || item.relation_type === "child" ? item.relation_type : "related" })));
 }
 
-type CardInput = Pick<Card, "question" | "answer" | "track" | "tags" | "difficulty"> & { questionVariants?: QuestionVariant[]; answerPoints?: AnswerPoint[]; note?: string; source?: string; status?: CardStatus; allowQuestionCollision?: boolean };
+type CardInput = Pick<Card, "question" | "answer" | "track" | "tags" | "difficulty"> & { questionVariants?: QuestionVariant[]; relations?: CardRelation[]; answerPoints?: AnswerPoint[]; note?: string; source?: string; status?: CardStatus; allowQuestionCollision?: boolean };
 
 function existingQuestionTexts(excludeCardId?: string) {
   return listCards().filter((card) => card.id !== excludeCardId).flatMap(allQuestionTexts);
 }
 
+function assertRelatedCardsExist(relations: CardRelation[]) {
+  if (!relations.length) return;
+  const ids = relations.map((relation) => relation.cardId);
+  const existing = new Set((sqlite.prepare(`SELECT id FROM cards WHERE id IN (${ids.map(() => "?").join(", ")})`).all(...ids) as Array<{ id: string }>).map((row) => row.id));
+  if (ids.some((id) => !existing.has(id))) throw new Error("关联问题不存在或已被删除。请刷新后重试。");
+}
+
+function replaceCardRelations(cardId: string, relations: CardRelation[]) {
+  const transaction = sqlite.transaction(() => {
+    sqlite.prepare("DELETE FROM card_relations WHERE card_id = ? OR related_card_id = ?").run(cardId, cardId);
+    const insert = sqlite.prepare("INSERT INTO card_relations (card_id, related_card_id, relation_type, created_at) VALUES (?, ?, ?, ?)");
+    const now = new Date().toISOString();
+    for (const relation of relations) {
+      insert.run(cardId, relation.cardId, relation.type, now);
+      insert.run(relation.cardId, cardId, reciprocalRelationType(relation.type), now);
+    }
+  });
+  transaction();
+}
+
 export function createCard(input: CardInput) {
   const id = randomUUID();
   const now = new Date().toISOString();
+  const relations = normalizeCardRelations(input.relations ?? []);
+  assertRelatedCardsExist(relations);
   const answerPoints = input.answerPoints?.filter((point) => point.content.trim()).length ? input.answerPoints : answerPointsFromStored(null, input.answer);
   if (!hasCoreAnswerPoint(answerPoints)) throw new Error("请至少填写一条核心答案要点。");
   const answer = answerFromPoints(answerPoints);
@@ -43,6 +79,7 @@ export function createCard(input: CardInput) {
   if (collision && !input.allowQuestionCollision) throw new Error(`问法“${collision}”已存在于其他卡片。`);
   sqlite.prepare("INSERT INTO cards (id, question, question_variants, answer, answer_points, note, track, tags, difficulty, source, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
     .run(id, question, questionVariantsToJson(question, questionVariants), answer, answerPointsToJson(answerPoints), input.note?.trim() ?? "", input.track, toTags(input.tags), input.difficulty, input.source ?? null, input.status ?? "learning", now, now);
+  replaceCardRelations(id, relations);
   return getCard(id)!;
 }
 
@@ -60,9 +97,11 @@ export function createTutorialCard() {
   });
 }
 
-export function updateCard(id: string, input: Pick<Card, "question" | "questionVariants" | "answerPoints" | "note" | "track" | "tags" | "difficulty">) {
+export function updateCard(id: string, input: Pick<Card, "question" | "questionVariants" | "relations" | "answerPoints" | "note" | "track" | "tags" | "difficulty">) {
   const card = getCard(id);
   if (!card) return undefined;
+  const relations = normalizeCardRelations(input.relations, id);
+  assertRelatedCardsExist(relations);
   const question = input.question.trim().replace(/\s+/g, " ");
   const questionVariants = normalizeQuestionVariants(question, input.questionVariants);
   const answerPoints = input.answerPoints.filter((point) => point.content.trim());
@@ -71,6 +110,7 @@ export function updateCard(id: string, input: Pick<Card, "question" | "questionV
   if (collision && card.source !== "tutorial") throw new Error(`问法“${collision}”已存在于其他卡片。`);
   sqlite.prepare("UPDATE cards SET question = ?, question_variants = ?, answer = ?, answer_points = ?, note = ?, track = ?, tags = ?, difficulty = ?, updated_at = ? WHERE id = ?")
     .run(question, questionVariantsToJson(question, questionVariants), answerFromPoints(answerPoints), answerPointsToJson(answerPoints), input.note.trim(), input.track, toTags(input.tags), input.difficulty, new Date().toISOString(), id);
+  replaceCardRelations(id, relations);
   return getCard(id);
 }
 
@@ -100,6 +140,7 @@ export function permanentlyDeleteCards(ids: string[]) {
   const unique = [...new Set(ids)];
   const transaction = sqlite.transaction(() => {
     for (const id of unique) {
+      sqlite.prepare("DELETE FROM card_relations WHERE card_id = ? OR related_card_id = ?").run(id, id);
       sqlite.prepare("DELETE FROM practice_focus WHERE card_id = ?").run(id);
       sqlite.prepare("DELETE FROM review_state WHERE card_id = ?").run(id);
       sqlite.prepare("DELETE FROM review_logs WHERE card_id = ?").run(id);

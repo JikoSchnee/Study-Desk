@@ -3,20 +3,21 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { sqlite } from "@/lib/db";
 import { getCard, listCards } from "@/lib/cards";
-import { evaluateAnswer, generateFollowUpQuestion } from "@/lib/ai";
+import { evaluateAnswer, generateFollowUpCardDraft, generateFollowUpQuestion } from "@/lib/ai";
 import { allQuestionTexts, pickPresentedQuestion } from "@/lib/question-variants";
 import { getAppSettings } from "@/lib/settings";
 
 const startSchema = z.object({ action: z.literal("start"), cardIds: z.array(z.string().uuid()).optional(), mode: z.enum(["real", "practice"]).default("real") });
 const answerSchema = z.object({ action: z.literal("answer"), sessionId: z.string().uuid(), turnId: z.string().uuid(), answer: z.string().min(1), comparisonMode: z.enum(["embedding", "llm"]).optional(), comparisonProgressId: z.string().min(1).optional() });
 const followUpSchema = z.object({ action: z.literal("followup"), sessionId: z.string().uuid(), turnId: z.string().uuid() });
+const followUpCardDraftSchema = z.object({ action: z.literal("followupCardDraft"), sessionId: z.string().uuid(), turnId: z.string().uuid() });
 
 function newTurn(sessionId: string, cardId: string, index: number) {
   const card = getCard(cardId)!;
   const id = randomUUID();
   const question = pickPresentedQuestion(card);
   sqlite.prepare("INSERT INTO interview_turns (id, session_id, card_id, question, is_extension, created_at) VALUES (?, ?, ?, ?, 0, ?)").run(id, sessionId, card.id, question, new Date().toISOString());
-  return { id, question, index };
+  return { id, question, index, isExtension: false };
 }
 
 export async function POST(request: Request) {
@@ -40,7 +41,21 @@ export async function POST(request: Request) {
     sqlite.prepare("INSERT INTO interview_turns (id, session_id, card_id, question, is_extension, parent_turn_id, created_at) VALUES (?, ?, ?, ?, 1, ?, ?)").run(id, input.sessionId, parent.card_id, question, input.turnId, new Date().toISOString());
     const session = sqlite.prepare("SELECT config FROM interview_sessions WHERE id = ?").get(input.sessionId) as { config: string } | undefined;
     const config = session ? JSON.parse(session.config) as { cursor: number } : { cursor: 0 };
-    return NextResponse.json({ turn: { id, question, index: config.cursor + 1 }, isExtension: true });
+    return NextResponse.json({ turn: { id, question, index: config.cursor + 1, isExtension: true } });
+  }
+  if (body.action === "followupCardDraft") {
+    try {
+      const input = followUpCardDraftSchema.parse(body);
+      const extension = sqlite.prepare("SELECT card_id, question, parent_turn_id FROM interview_turns WHERE id = ? AND session_id = ? AND is_extension = 1").get(input.turnId, input.sessionId) as { card_id: string; question: string; parent_turn_id: string | null } | undefined;
+      if (!extension?.parent_turn_id) return NextResponse.json({ error: "只能将本场模拟面试中的 AI 追问加入卡片库。" }, { status: 400 });
+      const parent = sqlite.prepare("SELECT answer, feedback FROM interview_turns WHERE id = ? AND session_id = ?").get(extension.parent_turn_id, input.sessionId) as { answer: string | null; feedback: string | null } | undefined;
+      const card = getCard(extension.card_id);
+      if (!card) return NextResponse.json({ error: "找不到追问对应的原卡。" }, { status: 404 });
+      const draft = await generateFollowUpCardDraft(card, extension.question, { answer: parent?.answer ?? "", gaps: parent?.feedback ? [parent.feedback] : [] });
+      return NextResponse.json({ draft });
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : "暂时无法生成追问卡草稿。" }, { status: 400 });
+    }
   }
   const input = answerSchema.parse(body);
   const turn = sqlite.prepare("SELECT * FROM interview_turns WHERE id = ? AND session_id = ?").get(input.turnId, input.sessionId) as { card_id: string; question: string; is_extension: number } | undefined;
@@ -54,7 +69,7 @@ export async function POST(request: Request) {
   if (turn.is_extension) {
     const nextCardId = config.cardIds[config.cursor];
     const next = sqlite.prepare("SELECT id, question FROM interview_turns WHERE session_id = ? AND card_id = ? AND is_extension = 0 AND answer IS NULL ORDER BY created_at ASC LIMIT 1").get(input.sessionId, nextCardId) as { id: string; question: string } | undefined;
-    if (next) return NextResponse.json({ evaluation, answeredQuestion: turn.question, otherQuestions, answeredIsExtension: true, finished: false, turn: { ...next, index: config.cursor + 1 }, total: config.cardIds.length });
+    if (next) return NextResponse.json({ evaluation, answeredQuestion: turn.question, otherQuestions, answeredIsExtension: true, finished: false, turn: { ...next, index: config.cursor + 1, isExtension: false }, total: config.cardIds.length });
     return NextResponse.json({ evaluation, answeredQuestion: turn.question, otherQuestions, answeredIsExtension: true, finished: true });
   }
   config.cursor += 1;
