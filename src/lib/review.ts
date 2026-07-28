@@ -57,8 +57,13 @@ export function recordInitialReview(cardId: string) {
 
 export function dueCards() {
   const now = new Date().toISOString();
-  const rows = sqlite.prepare(`SELECT c.id FROM cards c JOIN review_state r ON r.card_id = c.id WHERE c.status = 'review' AND r.due_at <= ? ORDER BY r.due_at ASC`).all(now) as Array<{ id: string }>;
+  const rows = sqlite.prepare(`SELECT c.id FROM cards c JOIN review_state r ON r.card_id = c.id WHERE c.status = 'review' AND r.due_at <= ? ORDER BY r.due_at ASC, c.id ASC`).all(now) as Array<{ id: string }>;
   return rows.map((row) => getCard(row.id)).filter(Boolean);
+}
+
+export function nextDueReview() {
+  const cards = dueCards();
+  return { card: cards[0] ?? null, dueCount: cards.length };
 }
 
 export function submitReview(cardId: string, response: string, score: number, suggestedRating: RatingName, confirmedRating: RatingName, comparison?: AnswerComparison, presentedQuestion?: string, feedback?: string) {
