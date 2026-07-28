@@ -68,7 +68,7 @@ const remoteLLMProvider: LLMProvider = {
       temperature: 0.2,
       jsonMode: true,
       system: "你是严谨的中文技术面试教练。只返回 JSON：{feedback:string,matches:[{id:string,status:covered|partial|missing,evidence:string[]}]}. evidence 必须逐字摘自本次回答；每条非 missing 要点至少给一个 evidence。不得编造证据。",
-      user: `问题：${card.question}\n参考答案要点：\n${card.answerPoints.map((point) => `- id=${point.id}：${point.content}`).join("\n")}\n本次回答：${answer}`,
+      user: `问题：${card.question}\n参考答案结构：\n${card.answerPoints.map((point) => `- id=${point.id}（${point.role === "opening" ? "开场总述" : point.role === "closing" ? "收束总结" : "核心要点"}）：${point.content}`).join("\n")}\n本次回答：${answer}`,
     });
     const data = JSON.parse(content) as { feedback?: unknown };
     const comparison = comparisonFromLLM(card, answer, data);

@@ -5,12 +5,14 @@ export type RatingName = "again" | "hard" | "good" | "easy";
 export type AnswerComparisonMode = "embedding" | "llm";
 export type AnswerComparisonSource = "embedding" | "lexical" | "llm";
 export type AnswerPointCoverage = "covered" | "partial" | "missing";
+export type AnswerPointRole = "opening" | "key" | "closing";
 
 export interface AnswerPoint {
   id: string;
   content: string;
   hint: string;
   note: string;
+  role?: AnswerPointRole;
 }
 
 export interface QuestionVariant {
@@ -85,6 +87,8 @@ export interface AnswerEvidence {
 export interface AnswerPointComparison {
   answerPointId: string;
   reference: string;
+  role?: AnswerPointRole;
+  weight?: number;
   status: AnswerPointCoverage;
   score: number;
   evidence: AnswerEvidence[];

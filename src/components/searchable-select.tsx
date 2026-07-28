@@ -71,6 +71,14 @@ export function SearchableSelect(props: SingleProps | MultipleProps) {
     setQuery("");
     setActiveIndex(0);
   };
+  const selectOption = (option: string) => {
+    if (props.multiple) selectMultiple([option]);
+    else selectSingle(option);
+  };
+  const selectWithPointer = (event: { preventDefault: () => void }, option: string) => {
+    event.preventDefault();
+    selectOption(option);
+  };
   const commitQuery = () => {
     const candidate = query.trim();
     if (!candidate) return;
@@ -98,18 +106,18 @@ export function SearchableSelect(props: SingleProps | MultipleProps) {
     if (event.key === "ArrowDown") { event.preventDefault(); setOpen(true); setActiveIndex((index) => Math.min(index + 1, Math.max(matches.length - 1, 0))); return; }
     if (event.key === "ArrowUp") { event.preventDefault(); setOpen(true); setActiveIndex((index) => Math.max(index - 1, 0)); return; }
     if (event.key === "Escape") { event.preventDefault(); setOpen(false); setQuery(props.multiple ? "" : props.value); return; }
-    if (event.key === "Enter") { event.preventDefault(); const active = matches[activeIndex]; if (active) { if (props.multiple) selectMultiple([active]); else selectSingle(active); } else commitQuery(); return; }
+    if (event.key === "Enter") { event.preventDefault(); const active = matches[activeIndex]; if (active) selectOption(active); else commitQuery(); return; }
     if (props.multiple && [",", "，", "|"].includes(event.key)) { event.preventDefault(); commitQuery(); }
     if (props.multiple && event.key === "Backspace" && !query && props.value.length) removeValue(props.value.at(-1)!);
   };
 
   return <div className={`searchable-select ${variant} ${open ? "open" : ""}`} ref={rootRef}>
     <div className="searchable-select-control" onMouseDown={(event) => { if (event.target === event.currentTarget) inputRef.current?.focus(); }}>
-      {props.multiple && values.map((value) => <span className="searchable-select-chip" key={value}>#{value}<button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => removeValue(value)} aria-label={`移除标签 ${value}`}><X size={13}/></button></span>)}
+      {props.multiple && values.map((value) => <span className="searchable-select-chip" key={value}>#{value}<button type="button" onPointerDown={(event) => event.preventDefault()} onClick={(event) => { event.stopPropagation(); removeValue(value); }} aria-label={`移除标签 ${value}`}><X size={13}/></button></span>)}
       <input ref={inputRef} value={query} required={required} aria-label={ariaLabel} aria-autocomplete="list" aria-controls={listboxId} aria-expanded={open} role="combobox" placeholder={values.length && props.multiple ? "继续输入标签" : placeholder} onFocus={() => { setOpen(true); setActiveIndex(0); }} onChange={(event) => { const value = event.target.value; if (props.multiple && /[，,|]$/.test(value)) { selectMultiple(value.split(/[，,|]/).filter(Boolean)); return; } setQuery(value); setOpen(true); setActiveIndex(0); }} onKeyDown={handleKeyDown} onBlur={() => window.setTimeout(() => { if (!rootRef.current?.contains(document.activeElement)) { commitQuery(); setOpen(false); } }, 0)} />
       {!props.multiple && props.value && <button type="button" className="searchable-select-clear" onMouseDown={(event) => event.preventDefault()} onClick={clearSingle} aria-label={`清除${ariaLabel}`}><X size={15}/></button>}
       <ChevronDown className="searchable-select-arrow" size={17}/>
     </div>
-    {open && <div className="searchable-select-menu" id={listboxId} role="listbox" aria-label={ariaLabel}>{matches.length ? matches.map((option, index) => <button type="button" role="option" aria-selected={index === activeIndex} className={index === activeIndex ? "active" : ""} key={option} onMouseDown={(event) => event.preventDefault()} onClick={() => props.multiple ? selectMultiple([option]) : selectSingle(option)}>{props.multiple && <span>+</span>}<MatchingLabel value={option} query={query}/></button>) : <p>{allowCustom && query.trim() ? `未找到匹配项，按 Enter 创建“${query.trim()}”` : emptyText}</p>}</div>}
+    {open && <div className="searchable-select-menu" id={listboxId} role="listbox" aria-label={ariaLabel}>{matches.length ? matches.map((option, index) => <button type="button" role="option" aria-selected={index === activeIndex} className={index === activeIndex ? "active" : ""} key={option} onPointerDown={(event) => selectWithPointer(event, option)} onClick={(event) => { if (event.detail === 0) selectOption(option); }}>{props.multiple && <span>+</span>}<MatchingLabel value={option} query={query}/></button>) : allowCustom && query.trim() ? <button type="button" className="searchable-select-create" onPointerDown={(event) => selectWithPointer(event, query.trim())} onClick={(event) => { if (event.detail === 0) selectOption(query.trim()); }}><span>+</span>添加“{query.trim()}”</button> : <p>{emptyText}</p>}</div>}
   </div>;
 }

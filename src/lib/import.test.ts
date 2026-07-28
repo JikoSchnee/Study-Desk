@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { answerPointsFromStored, answerPointsFromText, answerPointsToJson, previewImport, splitTags } from "./import";
+import { answerFromPoints, answerPointsFromStored, answerPointsFromText, answerPointsToJson, hasCoreAnswerPoint, normalizeAnswerPoints, previewImport, splitTags } from "./import";
 
 describe("previewImport", () => {
   it("rejects repeated questions without discarding valid cards", () => {
@@ -24,5 +24,18 @@ describe("card import normalization", () => {
     expect(answerPointsFromStored(stored, "ignored")).toMatchObject([{ content: "检索候选", hint: "先想覆盖率", note: "补一个业务案例" }, { content: "重排序", hint: "再想相关性", note: "" }]);
     expect(answerPointsFromStored('[{"id":"legacy","content":"旧版要点","hint":"旧提示"}]', "ignored")).toMatchObject([{ content: "旧版要点", hint: "旧提示", note: "" }]);
     expect(answerPointsFromStored("not-json", "旧答案\n第二行")).toMatchObject([{ content: "旧答案", hint: "", note: "" }, { content: "第二行", hint: "", note: "" }]);
+  });
+
+  it("keeps a total-summary answer in canonical order while legacy points remain core points", () => {
+    const points = normalizeAnswerPoints([
+      { id: "closing", content: "最后回扣边界", hint: "ignored", note: "ignored", role: "closing" },
+      { id: "key", content: "说明关键机制", hint: "机制", note: "", role: "key" },
+      { id: "opening", content: "先给出总框架", hint: "ignored", note: "ignored", role: "opening" },
+    ]);
+    expect(points.map((point) => point.role)).toEqual(["opening", "key", "closing"]);
+    expect(answerFromPoints(points)).toBe("先给出总框架\n说明关键机制\n最后回扣边界");
+    expect(answerPointsFromStored('[{"id":"legacy","content":"旧版要点"}]', "")[0].role).toBe("key");
+    expect(hasCoreAnswerPoint(points)).toBe(true);
+    expect(hasCoreAnswerPoint(points.filter((point) => point.role !== "key"))).toBe(false);
   });
 });

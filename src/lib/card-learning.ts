@@ -6,8 +6,9 @@ type SummaryRow = {
   card_id: string;
   due_at: string | null;
   last_review_at: string | null;
+  practice_count: number;
   review_count: number;
-  answer_count: number;
+  has_initial_practice: number;
   average_score: number | null;
   fsrs_card: string | null;
 };
@@ -22,6 +23,7 @@ type HistoryRow = {
 
 type LatestPracticeRow = {
   created_at: string;
+  is_initial: number;
   presented_question: string | null;
   response: string;
   ai_score: number;
@@ -54,8 +56,9 @@ function summaryFrom(row: SummaryRow): CardLearningSummary {
     cardId: row.card_id,
     nextReviewAt: row.due_at,
     lastReviewAt: row.last_review_at,
+    practiceCount: Number(row.practice_count),
     reviewCount: Number(row.review_count),
-    answerCount: Number(row.answer_count),
+    hasInitialPractice: Boolean(row.has_initial_practice),
     averageScore: row.average_score === null ? null : Math.round(Number(row.average_score)),
     fsrsDifficulty: fsrsDifficulty(row.fsrs_card),
   };
@@ -66,8 +69,9 @@ export function cardLearningSummaries(cardIds: string[]): Record<string, CardLea
   const placeholders = cardIds.map(() => "?").join(", ");
   const rows = sqlite.prepare(`
     SELECT c.id AS card_id, r.due_at, r.fsrs_card, MAX(l.created_at) AS last_review_at,
-      COUNT(l.id) AS review_count, SUM(CASE WHEN l.is_initial = 0 THEN 1 ELSE 0 END) AS answer_count,
-      AVG(CASE WHEN l.is_initial = 0 THEN l.ai_score END) AS average_score
+      COUNT(l.id) AS practice_count, SUM(CASE WHEN l.is_initial = 0 THEN 1 ELSE 0 END) AS review_count,
+      MAX(CASE WHEN l.is_initial = 1 THEN 1 ELSE 0 END) AS has_initial_practice,
+      AVG(l.ai_score) AS average_score
     FROM cards c
     LEFT JOIN review_state r ON r.card_id = c.id
     LEFT JOIN review_logs l ON l.card_id = c.id
@@ -85,8 +89,9 @@ export function cardLearningDetails(cardId: string): CardLearningDetails {
     cardId,
     nextReviewAt: null,
     lastReviewAt: null,
+    practiceCount: 0,
     reviewCount: 0,
-    answerCount: 0,
+    hasInitialPractice: false,
     averageScore: null,
     fsrsDifficulty: null,
   };
@@ -102,7 +107,7 @@ export function cardLearningDetails(cardId: string): CardLearningDetails {
     const due = row.next_due_at ? new Date(row.next_due_at).getTime() : Number.NaN;
     return {
       reviewedAt: row.created_at,
-      score: row.is_initial ? null : row.ai_score,
+      score: row.ai_score,
       rating: row.confirmed_rating,
       nextReviewAt: row.next_due_at,
       intervalMinutes: Number.isFinite(due) && Number.isFinite(reviewed) ? Math.max(0, Math.round((due - reviewed) / 60_000)) : null,
@@ -110,15 +115,16 @@ export function cardLearningDetails(cardId: string): CardLearningDetails {
     };
   });
   const latest = sqlite.prepare(`
-    SELECT created_at, presented_question, response, ai_score, feedback, suggested_rating, confirmed_rating,
+    SELECT created_at, is_initial, presented_question, response, ai_score, feedback, suggested_rating, confirmed_rating,
       next_due_at, comparison_mode, answer_comparison
     FROM review_logs
-    WHERE card_id = ? AND is_initial = 0
+    WHERE card_id = ?
     ORDER BY created_at DESC
     LIMIT 1
   `).get(cardId) as LatestPracticeRow | undefined;
   const latestPractice: LatestPracticeRecord | null = latest ? {
     reviewedAt: latest.created_at,
+    isInitial: Boolean(latest.is_initial),
     presentedQuestion: latest.presented_question,
     response: latest.response,
     score: latest.ai_score,

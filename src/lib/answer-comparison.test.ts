@@ -53,4 +53,17 @@ describe("answer comparison", () => {
     expect(comparison.points[1].evidence[0].text).toBe("最后说明潜在风险。");
     expect(comparison.points[0].evidence[0].end).toBeLessThanOrEqual(comparison.points[1].evidence[0].start);
   });
+
+  it("weights optional opening and closing sections below the core answer points", () => {
+    const structuredCard: Card = { ...card, answerPoints: [
+      { id: "opening", content: "先给出整体结论", hint: "", note: "", role: "opening" },
+      { id: "key", content: "说明关键机制", hint: "", note: "", role: "key" },
+      { id: "closing", content: "最后回扣适用边界", hint: "", note: "", role: "closing" },
+    ] };
+    const comparison = compareLexically(structuredCard, "说明关键机制。");
+    expect(comparison.points.map((point) => point.weight)).toEqual([.1, .8, .1]);
+    expect(comparison.points.map((point) => point.role)).toEqual(["opening", "key", "closing"]);
+    expect(evaluationFromComparison(comparison).score).toBe(80);
+    expect(evaluationFromComparison(comparison).gaps).toEqual(["开场总述：先给出整体结论", "收束总结：最后回扣适用边界"]);
+  });
 });

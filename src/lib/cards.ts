@@ -2,7 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { sqlite } from "@/lib/db";
 import { parseTags, toTags } from "@/lib/utils";
-import { answerFromPoints, answerPointsFromStored, answerPointsToJson, previewImport } from "@/lib/import";
+import { answerFromPoints, answerPointsFromStored, answerPointsToJson, hasCoreAnswerPoint, previewImport } from "@/lib/import";
 import { allQuestionTexts, findQuestionCollision, normalizeQuestionVariants, questionVariantsFromStored, questionVariantsToJson } from "@/lib/question-variants";
 import { findSimilarImportQuestions } from "@/lib/import-similarity";
 import type { AnswerPoint, Card, CardStatus, QuestionVariant } from "@/lib/types";
@@ -25,7 +25,7 @@ export function getCard(id: string): Card | undefined {
   return row ? mapCard(row) : undefined;
 }
 
-type CardInput = Pick<Card, "question" | "answer" | "track" | "tags" | "difficulty"> & { questionVariants?: QuestionVariant[]; answerPoints?: AnswerPoint[]; note?: string; source?: string; status?: CardStatus };
+type CardInput = Pick<Card, "question" | "answer" | "track" | "tags" | "difficulty"> & { questionVariants?: QuestionVariant[]; answerPoints?: AnswerPoint[]; note?: string; source?: string; status?: CardStatus; allowQuestionCollision?: boolean };
 
 function existingQuestionTexts(excludeCardId?: string) {
   return listCards().filter((card) => card.id !== excludeCardId).flatMap(allQuestionTexts);
@@ -35,14 +35,29 @@ export function createCard(input: CardInput) {
   const id = randomUUID();
   const now = new Date().toISOString();
   const answerPoints = input.answerPoints?.filter((point) => point.content.trim()).length ? input.answerPoints : answerPointsFromStored(null, input.answer);
+  if (!hasCoreAnswerPoint(answerPoints)) throw new Error("请至少填写一条核心答案要点。");
   const answer = answerFromPoints(answerPoints);
   const question = input.question.trim().replace(/\s+/g, " ");
   const questionVariants = normalizeQuestionVariants(question, input.questionVariants ?? []);
   const collision = findQuestionCollision(question, questionVariants, existingQuestionTexts());
-  if (collision) throw new Error(`问法“${collision}”已存在于其他卡片。`);
+  if (collision && !input.allowQuestionCollision) throw new Error(`问法“${collision}”已存在于其他卡片。`);
   sqlite.prepare("INSERT INTO cards (id, question, question_variants, answer, answer_points, note, track, tags, difficulty, source, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
     .run(id, question, questionVariantsToJson(question, questionVariants), answer, answerPointsToJson(answerPoints), input.note?.trim() ?? "", input.track, toTags(input.tags), input.difficulty, input.source ?? null, input.status ?? "learning", now, now);
   return getCard(id)!;
+}
+
+export function createTutorialCard() {
+  return createCard({
+    question: "演示：RAG 为什么需要重排序？",
+    answer: "重排序会对初步检索结果做更精细的相关性判断\n把最相关的资料排到上下文前面\n减少无关内容对生成答案的干扰",
+    answerPoints: [
+      { id: randomUUID(), content: "初步检索通常只做快速召回，相关性排序不够精细。", hint: "先召回，再精排", note: "" },
+      { id: randomUUID(), content: "重排序模型会重新判断 query 与候选资料的语义相关性。", hint: "相关性判断", note: "" },
+      { id: randomUUID(), content: "把高相关资料放在前面，可以提升上下文质量和最终回答准确性。", hint: "减少噪声", note: "" },
+    ],
+    track: "演示", tags: ["演示", "RAG"], difficulty: 2, source: "tutorial", status: "learning", allowQuestionCollision: true,
+    note: "基础教程自动创建的演示卡；可在教程最后从卡片库归档或永久删除。",
+  });
 }
 
 export function updateCard(id: string, input: Pick<Card, "question" | "questionVariants" | "answerPoints" | "note" | "track" | "tags" | "difficulty">) {
@@ -51,8 +66,9 @@ export function updateCard(id: string, input: Pick<Card, "question" | "questionV
   const question = input.question.trim().replace(/\s+/g, " ");
   const questionVariants = normalizeQuestionVariants(question, input.questionVariants);
   const answerPoints = input.answerPoints.filter((point) => point.content.trim());
+  if (!hasCoreAnswerPoint(answerPoints)) throw new Error("请至少填写一条核心答案要点。");
   const collision = findQuestionCollision(question, questionVariants, existingQuestionTexts(id));
-  if (collision) throw new Error(`问法“${collision}”已存在于其他卡片。`);
+  if (collision && card.source !== "tutorial") throw new Error(`问法“${collision}”已存在于其他卡片。`);
   sqlite.prepare("UPDATE cards SET question = ?, question_variants = ?, answer = ?, answer_points = ?, note = ?, track = ?, tags = ?, difficulty = ?, updated_at = ? WHERE id = ?")
     .run(question, questionVariantsToJson(question, questionVariants), answerFromPoints(answerPoints), answerPointsToJson(answerPoints), input.note.trim(), input.track, toTags(input.tags), input.difficulty, new Date().toISOString(), id);
   return getCard(id);
