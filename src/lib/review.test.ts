@@ -4,6 +4,14 @@ const database = vi.hoisted(() => ({
   runs: [] as Array<{ sql: string; args: unknown[] }>,
   dueRows: [] as Array<{ id: string }>,
   queries: [] as string[],
+  state: null as string | null,
+}));
+const cards = vi.hoisted(() => ({
+  rows: [
+    { id: "learning-card", question: "新题", status: "learning", createdAt: "2026-01-01T00:00:00.000Z" },
+    { id: "review-card", question: "旧题", status: "review", createdAt: "2026-01-02T00:00:00.000Z" },
+  ] as Array<{ id: string; question: string; status: string; createdAt: string }>,
+  statusUpdates: [] as Array<{ id: string; status: string }>,
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -11,49 +19,76 @@ vi.mock("@/lib/db", () => ({
     prepare: (sql: string) => {
       database.queries.push(sql);
       return {
-        get: () => undefined,
-        all: () => database.dueRows,
-        run: (...args: unknown[]) => { database.runs.push({ sql, args }); return {}; },
+        get: () => {
+          if (sql.startsWith("SELECT card_id FROM review_state")) return database.state ? { card_id: "learning-card" } : undefined;
+          if (sql.startsWith("SELECT fsrs_card FROM review_state")) return database.state ? { fsrs_card: database.state } : undefined;
+          if (sql.includes("SELECT COUNT(*) AS count FROM cards WHERE")) return { count: 1 };
+          if (sql.includes("SELECT COUNT(*) AS count FROM cards c JOIN")) return { count: database.dueRows.length };
+          if (sql.includes("COALESCE(SUM")) return { initial_count: 0, review_count: 0 };
+          return undefined;
+        },
+        all: () => sql.includes("FROM cards c JOIN review_state") ? database.dueRows : [],
+        run: (...args: unknown[]) => {
+          database.runs.push({ sql, args });
+          if (sql.startsWith("INSERT INTO review_state")) database.state = String(args[1]);
+          if (sql.startsWith("UPDATE review_state")) database.state = String(args[0]);
+          return {};
+        },
       };
     },
     transaction: (operation: () => void) => () => operation(),
   },
 }));
 
-vi.mock("@/lib/cards", () => ({ getCard: (id: string) => ({ id, question: "测试卡片" }) }));
+vi.mock("@/lib/cards", () => ({
+  getCard: (id: string) => cards.rows.find((card) => card.id === id),
+  listCards: () => cards.rows,
+  updateCardStatus: (id: string, status: string) => { cards.statusUpdates.push({ id, status }); },
+}));
 
-import { dueCards, nextDueReview, recordInitialReview } from "@/lib/review";
+import { dueCards, initialCards, nextReviewCard, submitReview } from "@/lib/review";
 
 beforeEach(() => {
   database.runs.length = 0;
   database.dueRows.length = 0;
   database.queries.length = 0;
+  database.state = null;
+  cards.statusUpdates.length = 0;
 });
 
-describe("recordInitialReview", () => {
-
-  it("creates a Hard FSRS state and a non-scoring initial activity record", () => {
-    const result = recordInitialReview("card-1");
+describe("first practice", () => {
+  it("creates FSRS state only after the first real answer and marks it as initial", () => {
+    const first = submitReview("learning-card", "我的第一次作答", 86, "good", "good");
     const stateInsert = database.runs.find((entry) => entry.sql.startsWith("INSERT INTO review_state"));
-    const logInsert = database.runs.find((entry) => entry.sql.startsWith("INSERT INTO review_logs"));
+    const firstLog = database.runs.find((entry) => entry.sql.startsWith("INSERT INTO review_logs"));
 
-    expect(result.initialized).toBe(true);
-    expect(JSON.parse(String(stateInsert?.args[1])).difficulty).toBeGreaterThanOrEqual(1);
-    expect(logInsert?.args.slice(2, 6)).toEqual(["系统首次练习初始化", 0, "hard", "hard"]);
-    expect(logInsert?.args[9]).toBe(1);
-    expect(database.runs.some((entry) => entry.sql.startsWith("UPDATE cards SET status = 'review'"))).toBe(true);
+    expect(first.isInitial).toBe(true);
+    expect(JSON.parse(String(stateInsert?.args[1]))).toHaveProperty("due");
+    expect(firstLog?.args.slice(2, 6)).toEqual(["我的第一次作答", 86, "good", "good"]);
+    expect(firstLog?.args[11]).toBe(1);
+    expect(cards.statusUpdates).toEqual([{ id: "learning-card", status: "review" }]);
+
+    const second = submitReview("learning-card", "第二次作答", 92, "easy", "easy");
+    const logs = database.runs.filter((entry) => entry.sql.startsWith("INSERT INTO review_logs"));
+    expect(second.isInitial).toBe(false);
+    expect(logs[1]?.args[11]).toBe(0);
   });
 });
 
-describe("due review queue", () => {
-  it("uses due time and card ID for a stable queue order", () => {
-    database.dueRows.push({ id: "card-earlier" }, { id: "card-later" });
+describe("review queues", () => {
+  it("keeps new cards in the initial-practice queue", () => {
+    expect(initialCards().map((card) => card.id)).toEqual(["learning-card"]);
+  });
 
-    expect(dueCards().map((card) => card?.id)).toEqual(["card-earlier", "card-later"]);
+  it("uses due time and card ID for a stable review order", () => {
+    database.dueRows.push({ id: "review-card" });
+
+    expect(dueCards().map((card) => card?.id)).toEqual(["review-card"]);
     expect(database.queries.find((sql) => sql.includes("FROM cards c JOIN review_state"))).toContain("ORDER BY r.due_at ASC, c.id ASC");
   });
 
-  it("returns no next card when the due queue is empty", () => {
-    expect(nextDueReview()).toEqual({ card: null, dueCount: 0 });
+  it("returns queue progress with the next initial-practice card", () => {
+    expect(nextReviewCard("initial").card?.id).toBe("learning-card");
+    expect(nextReviewCard("initial").progress).toEqual({ initial: { pending: 1, completedToday: 0 }, review: { pending: 0, completedToday: 0 }, weak: { pending: 0, completedToday: 0 } });
   });
 });

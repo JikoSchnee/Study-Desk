@@ -39,8 +39,9 @@ export interface CardLearningSummary {
   cardId: string;
   nextReviewAt: string | null;
   lastReviewAt: string | null;
+  practiceCount: number;
   reviewCount: number;
-  answerCount: number;
+  hasInitialPractice: boolean;
   averageScore: number | null;
   fsrsDifficulty: number | null;
 }
@@ -98,6 +99,7 @@ export interface AnswerComparison {
 
 export interface LatestPracticeRecord {
   reviewedAt: string;
+  isInitial: boolean;
   presentedQuestion: string | null;
   response: string;
   score: number;

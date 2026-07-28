@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { cardLearningSummaries } from "@/lib/card-learning";
-import { nextDueReview } from "@/lib/review";
+import { nextReviewCard, type ReviewQueueKind } from "@/lib/review";
 import { pickPresentedQuestion } from "@/lib/question-variants";
 
-export async function GET() {
-  const { card, dueCount } = nextDueReview();
+export async function GET(request: Request) {
+  const params = new URL(request.url).searchParams;
+  const queue = params.get("queue");
+  if (queue !== "initial" && queue !== "review" && queue !== "weak") return NextResponse.json({ error: "请选择练习队列。" }, { status: 400 });
+  const { card, pending, progress } = nextReviewCard(queue as ReviewQueueKind, params.get("cardId"));
   const learning = card ? cardLearningSummaries([card.id])[card.id] ?? null : null;
-  return NextResponse.json({ card, learning, dueCount, presentedQuestion: card ? pickPresentedQuestion(card) : null });
+  return NextResponse.json({ card, learning, pending, progress, presentedQuestion: card ? pickPresentedQuestion(card) : null });
 }

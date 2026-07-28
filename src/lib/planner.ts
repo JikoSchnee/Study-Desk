@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { sqlite } from "@/lib/db";
 import { shanghaiDayBounds, todayShanghai } from "@/lib/utils";
 import { listCards } from "@/lib/cards";
+import { getAppSettings } from "@/lib/settings";
 import type { DailyTask } from "@/lib/types";
 
 function rowToTask(row: Record<string, unknown>): DailyTask {
@@ -12,29 +13,25 @@ function rowToTask(row: Record<string, unknown>): DailyTask {
   };
 }
 
-export function ensureDailyPlan(date = todayShanghai(), budgetMinutes?: number) {
-  const preference = sqlite.prepare("SELECT value FROM settings WHERE key = 'dailyMinutes'").get() as { value: string } | undefined;
-  const resolvedBudget = budgetMinutes ?? Number(preference?.value ?? 30);
+export function ensureDailyPlan(date = todayShanghai()) {
+  const preference = getAppSettings();
   const exists = sqlite.prepare("SELECT date FROM daily_plans WHERE date = ?").get(date);
-  if (!exists) sqlite.prepare("INSERT INTO daily_plans (date, budget_minutes, created_at) VALUES (?, ?, ?)").run(date, resolvedBudget, new Date().toISOString());
+  if (!exists) sqlite.prepare("INSERT INTO daily_plans (date, budget_minutes, created_at) VALUES (?, ?, ?)").run(date, preference.dailyInitialTarget + preference.dailyReviewTarget, new Date().toISOString());
 
+  // Interview tasks belonged to the old minute-budget planner. Remove them as
+  // part of the migration instead of leaving misleading, disconnected tasks.
+  sqlite.prepare("DELETE FROM daily_tasks WHERE plan_date = ? AND kind = 'interview'").run(date);
   const existingTasks = listDailyTasks(date);
-  const assignedCards = new Set(existingTasks.map((task) => task.cardId).filter(Boolean));
-  let allocated = existingTasks.reduce((sum, task) => sum + task.estimateMinutes, 0);
+  const assignedCards = new Set(existingTasks.filter((task) => task.status !== "skipped").map((task) => task.cardId).filter(Boolean));
   const now = new Date().toISOString();
-  const insertTask = (kind: "review" | "learn" | "interview", title: string, cardId: string | null, estimate: number) => {
+  const insertTask = (kind: "review" | "learn", title: string, cardId: string, estimate: number) => {
     sqlite.prepare("INSERT INTO daily_tasks (id, plan_date, kind, title, card_id, estimate_minutes, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'todo', ?)")
       .run(randomUUID(), date, kind, title, cardId, estimate, now);
-    allocated += estimate;
   };
-  const dueRows = sqlite.prepare("SELECT c.id, c.question FROM cards c JOIN review_state r ON r.card_id = c.id WHERE c.status = 'review' AND r.due_at <= ? ORDER BY r.due_at ASC LIMIT 8").all(now) as Array<{ id: string; question: string }>;
+  const dueRows = sqlite.prepare("SELECT c.id, c.question FROM cards c JOIN review_state r ON r.card_id = c.id WHERE c.status = 'review' AND r.due_at <= ? ORDER BY r.due_at ASC, c.id ASC LIMIT ?").all(now, preference.dailyReviewTarget) as Array<{ id: string; question: string }>;
   for (const card of dueRows) if (!assignedCards.has(card.id)) { insertTask("review", `复习：${card.question}`, card.id, 3); assignedCards.add(card.id); }
-  const learning = listCards().filter((card) => card.status === "learning" && !assignedCards.has(card.id));
-  for (const card of learning) {
-    if (allocated + 5 > resolvedBudget || existingTasks.filter((task) => task.kind === "learn").length >= 5) break;
-    insertTask("learn", `学习：${card.question}`, card.id, 5); assignedCards.add(card.id);
-  }
-  if (!existingTasks.some((task) => task.kind === "interview") && allocated <= resolvedBudget - 10) insertTask("interview", "完成 10 分钟迷你模拟", null, 10);
+  const learning = listCards().filter((card) => card.status === "learning" && !assignedCards.has(card.id)).slice(0, preference.dailyInitialTarget);
+  for (const card of learning) { insertTask("learn", `学习：${card.question}`, card.id, 5); assignedCards.add(card.id); }
   return listDailyTasks(date);
 }
 
@@ -45,6 +42,13 @@ export function listDailyTasks(date = todayShanghai()) {
 export function updateTask(id: string, status: "todo" | "done" | "skipped") {
   sqlite.prepare("UPDATE daily_tasks SET status = ? WHERE id = ?").run(status, id);
   return sqlite.prepare("SELECT * FROM daily_tasks WHERE id = ?").get(id);
+}
+
+/** A plan is progress, not a checkbox: completing the real review completes its task. */
+export function completeTodayTaskForCard(cardId: string, isInitial: boolean) {
+  const kind = isInitial ? "learn" : "review";
+  sqlite.prepare("UPDATE daily_tasks SET status = 'done' WHERE plan_date = ? AND card_id = ? AND kind = ? AND status = 'todo'")
+    .run(todayShanghai(), cardId, kind);
 }
 
 export function calendarSummary(month: string) {

@@ -47,9 +47,19 @@ export default function CardsPage() {
 
   const load = useCallback(() => fetch("/api/cards").then((response) => response.json()).then((data) => setCards(data.cards)), []);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const raw = window.localStorage.getItem("mock-interview:supplement-draft");
+    if (!raw) return;
+    try {
+      const saved = JSON.parse(raw) as { question?: string; answerPoints?: string[]; track?: string; tags?: string[] };
+      setDraft({ question: saved.question ?? "", questionVariants: [], answerPoints: (saved.answerPoints ?? [""]).map((content) => point(content)), note: "由练习反馈生成；保存前请补全或校对内容。", track: saved.track ?? "Agent", tags: (saved.tags ?? []).join(", "), source: "" });
+      setNotice("已根据遗漏要点生成补充卡草稿，请确认后保存。");
+    } catch { /* Ignore an old or malformed local draft. */ }
+    window.localStorage.removeItem("mock-interview:supplement-draft");
+  }, []);
   const resetImport = () => { setFile(null); setSheets([]); setSheetName(""); setMapping(emptyMapping); setPreviewRows([]); setIncluded(new Set()); setDragging(false); };
   const openImport = () => { setMode("import"); setAiCandidates([]); setNotice(""); resetImport(); };
-  const submit = async (event: FormEvent) => { event.preventDefault(); const response = await fetch("/api/cards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...draft, track: draft.track.trim(), tags: splitTags(draft.tags) }) }); const data = await response.json(); if (response.ok) { setNotice("卡片已以困难级完成首次 FSRS 练习，并加入复习节奏。"); setDraft(freshDraft()); load(); } else setNotice(data.error ?? "保存失败，请检查问题和答案要点。"); };
+  const submit = async (event: FormEvent) => { event.preventDefault(); const response = await fetch("/api/cards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...draft, track: draft.track.trim(), tags: splitTags(draft.tags) }) }); const data = await response.json(); if (response.ok) { setNotice("卡片已加入待首次练习；完成第一次真实作答后，才会进入复习节奏。"); setDraft(freshDraft()); load(); } else setNotice(data.error ?? "保存失败，请检查问题和答案要点。"); };
   const inspectFile = async (selected: File) => { setImportBusy(true); setNotice(""); const form = new FormData(); form.set("file", selected); form.set("phase", "inspect"); const response = await fetch("/api/cards/import/parse", { method: "POST", body: form }); const data = await response.json(); setImportBusy(false); if (!response.ok) { setNotice(data.error ?? "无法读取文件。"); return; } const first = data.sheets[0] as SheetInfo | undefined; setFile(selected); setSheets(data.sheets); setSheetName(first?.name ?? ""); setMapping(first?.mapping ?? emptyMapping); setPreviewRows([]); };
   const previewFile = async () => { if (!file || !sheetName) return; setImportBusy(true); const form = new FormData(); form.set("file", file); form.set("phase", "preview"); form.set("sheetName", sheetName); form.set("mapping", JSON.stringify(mapping)); const response = await fetch("/api/cards/import/parse", { method: "POST", body: form }); const data = await response.json(); setImportBusy(false); if (!response.ok) { setNotice(data.error ?? "无法生成预览。"); return; } setPreviewRows(data.preview); setIncluded(new Set(data.preview.filter((row: ImportPreviewRow) => row.status === "valid").map((row: ImportPreviewRow) => row.id))); if (data.truncated) setNotice("文件超过 500 行，仅显示前 500 行供导入。"); };
   const updateRow = (id: string, change: Partial<ImportPreviewRow["card"]>) => setPreviewRows((rows) => rows.map((row) => row.id !== id ? row : { ...row, status: change.question !== undefined || change.answerPoints !== undefined ? "valid" : row.status, reason: change.question !== undefined || change.answerPoints !== undefined ? undefined : row.reason, card: { ...row.card, ...change } }));

@@ -119,3 +119,21 @@ export async function generateQuestionVariants(question: string, answerPoints: s
   if (!variants.length) throw new Error("模型返回的问法与现有内容重复，请再试一次。");
   return variants;
 }
+
+export async function generateFollowUpQuestion(card: Card, answer: string, gaps: string[]) {
+  const config = remoteModelConfig();
+  if (!config) throw new Error("请先在设置中配置模型服务，再使用 AI 拓展追问。");
+  try {
+    const content = await requestModel(config, {
+      temperature: 0.45,
+      jsonMode: true,
+      system: "你是严谨的中文技术面试官。只返回 JSON：{\"question\":\"...\"}。生成一条简洁、可回答的追问，必须紧扣候选人的遗漏要点；不要要求未给出的项目经历、不要重复原题、不要给出答案或评价。",
+      user: `原问题：${card.question}\n参考答案要点：${card.answerPoints.map((point) => point.content).join("；")}\n候选人回答：${answer}\n已识别遗漏：${gaps.join("；") || "请从覆盖不足的关键要点切入"}`,
+    });
+    const question = (JSON.parse(content) as { question?: unknown }).question;
+    if (typeof question !== "string" || question.trim().length < 3) throw new Error("模型没有返回有效追问。");
+    return question.trim();
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : "暂时无法生成追问。");
+  }
+}
