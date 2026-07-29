@@ -330,7 +330,12 @@ export function CardLibrary() {
           </div>
           <h3>{card.question}{card.questionVariants.length > 0 && <span className="variant-count"><Sparkles size={14}/> 另有 {card.questionVariants.length} 种问法</span>}</h3>
           <div className="knowledge-card-scroll-content">
-            <p>{card.answer}</p>
+            <details className="card-answer-details">
+              <summary>
+                <span className="card-answer-copy">{card.answer}</span>
+                <span className="card-answer-toggle"><span className="when-closed">展开答案</span><span className="when-open">收起答案</span></span>
+              </summary>
+            </details>
             {card.questionVariants.length > 0 && <details className="variant-details"><summary>查看其他问法</summary><ul>{card.questionVariants.map((item) => <li key={item.id}><span className={`variant-source ${item.source}`}>{item.source === "ai" ? "AI" : "我的"}</span>{item.content}</li>)}</ul></details>}
             <div className="card-learning-summary">
               <span><CalendarClock size={14}/> 下次：{compactReviewTime(learning?.nextReviewAt, true)}</span>
