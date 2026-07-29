@@ -204,8 +204,8 @@ export function CardLibrary() {
           <div className="knowledge-card-top">
             <label className="card-select"><input type="checkbox" checked={selected} onChange={() => toggleSelected(card.id)} /> 选择</label>
             <div className="card-indicators">
-              {tier && <button type="button" className={`difficulty-badge difficulty-trigger difficulty-${tier.label.toLowerCase()}`} onClick={() => setDifficultyPreviewOpen(true)} title={`FSRS 难度 ${learning?.fsrsDifficulty?.toFixed(1)} / 10；点击查看五档标签说明`} aria-label={`${tier.label} 难度，FSRS ${learning?.fsrsDifficulty?.toFixed(1)} / 10。点击查看五档标签说明`}>{tier.label}<small>{learning?.fsrsDifficulty?.toFixed(1)}</small></button>}
               {(card.note.trim() || card.answerPoints.some((item) => item.note.trim())) && <span className="note-count"><MessageSquareText size={14}/> 有批注</span>}
+              {tier && <button type="button" className={`difficulty-badge difficulty-trigger difficulty-${tier.label.toLowerCase()}`} onClick={() => setDifficultyPreviewOpen(true)} title={`FSRS 难度 ${learning?.fsrsDifficulty?.toFixed(1)} / 10；点击查看五档标签说明`} aria-label={`${tier.label} 难度，FSRS ${learning?.fsrsDifficulty?.toFixed(1)} / 10。点击查看五档标签说明`}>{tier.label}<small>{learning?.fsrsDifficulty?.toFixed(1)}</small></button>}
             </div>
           </div>
           <h3>{card.question}{card.questionVariants.length > 0 && <span className="variant-count"><Sparkles size={14}/> 另有 {card.questionVariants.length} 种问法</span>}</h3>
