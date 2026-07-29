@@ -7,7 +7,13 @@ import { modelProviders, type ModelProviderId } from "@/lib/model-providers";
 import type { AnswerComparisonMode } from "@/lib/types";
 
 type EnvironmentSettings = { provider: ModelProviderId; baseUrl: string; model: string; apiKeyConfigured: boolean };
+type LocalEmbeddingModelStatus = { state: "pending" | "downloading" | "verifying" | "retrying" | "ready" | "error"; onnxState: "pending" | "parsing" | "ready" | "failed"; downloadedBytes: number; totalBytes: number | null; attempt: number; error?: string };
 const CUSTOM_MODEL_OPTION = "__custom_model__";
+
+function sizeLabel(bytes: number) {
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
 
 export default function SettingsPage() {
   const [dailyInitialTarget, setDailyInitialTarget] = useState(5);
@@ -27,6 +33,7 @@ export default function SettingsPage() {
   const [backupPreview, setBackupPreview] = useState<{ counts: Record<string, number>; cardConflicts: number } | null>(null);
   const [backupNotice, setBackupNotice] = useState("");
   const [warmingModel, setWarmingModel] = useState(false);
+  const [embeddingStatus, setEmbeddingStatus] = useState<LocalEmbeddingModelStatus>({ state: "pending", onnxState: "pending", downloadedBytes: 0, totalBytes: null, attempt: 0 });
 
   useEffect(() => {
     Promise.all([fetch("/api/settings").then((response) => response.json()), fetch("/api/settings/environment").then((response) => response.json())])
@@ -35,6 +42,19 @@ export default function SettingsPage() {
         const config = environment as EnvironmentSettings;
         setProvider(config.provider ?? "custom"); setSavedProvider(config.provider ?? "custom"); setBaseUrl(config.baseUrl ?? ""); setModel(config.model ?? ""); setApiKeyConfigured(Boolean(config.apiKeyConfigured));
       });
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const readStatus = async () => {
+      try {
+        const response = await fetch("/api/settings/prewarm", { cache: "no-store" });
+        if (response.ok && active) setEmbeddingStatus(await response.json() as LocalEmbeddingModelStatus);
+      } catch { /* The next polling pass can recover from a transient request error. */ }
+    };
+    void readStatus();
+    const timer = window.setInterval(() => { void readStatus(); }, 1_000);
+    return () => { active = false; window.clearInterval(timer); };
   }, []);
 
   const save = async () => {
@@ -87,17 +107,17 @@ export default function SettingsPage() {
     if (mode === "replace") await downloadBackup();
     const response = await fetch("/api/backup/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "restore", backup: backupPayload, mode }) }); const data = await response.json(); setBackupNotice(response.ok ? "恢复完成，页面即将刷新。" : data.error ?? "恢复失败。"); if (response.ok) window.setTimeout(() => window.location.reload(), 700);
   };
-  const prewarmModel = async () => {
-    setWarmingModel(true); setNotice("正在下载并加载本地语义模型；首次操作可能需要一些时间。");
-    try { const response = await fetch("/api/settings/prewarm", { method: "POST" }); const data = await response.json(); if (!response.ok) throw new Error(data.error ?? "预热失败。"); setNotice("本地语义模型已准备好，之后作答可直接开始比对。"); }
-    catch (error) { setNotice(error instanceof Error ? error.message : "预热失败。"); }
+  const redownloadEmbeddingModel = async () => {
+    setWarmingModel(true); setNotice("已清理旧缓存，正在后台重新下载 bge-m3，本页会显示进度。");
+    try { const response = await fetch("/api/settings/prewarm", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ force: true }) }); const data = await response.json() as LocalEmbeddingModelStatus & { error?: string }; if (!response.ok) throw new Error(data.error ?? "重新下载失败。"); setEmbeddingStatus(data); }
+    catch (error) { setNotice(error instanceof Error ? error.message : "重新下载失败。"); }
     finally { setWarmingModel(false); }
   };
 
   return <>
     <header className="page-header"><div><p className="eyebrow"><SlidersHorizontal size={15}/> 设置</p><h1>把节奏调成适合你的样子。</h1><p>本地优先，配置只保存在你的设备上。</p></div></header>
     <div className="two-column">
-      <Panel data-tour="settings-goals"><div className="form-grid"><label className="field">每日首次学习数<select value={dailyInitialTarget} onChange={(event) => setDailyInitialTarget(Number(event.target.value))}>{[0, 3, 5, 8, 10, 15].map((count) => <option value={count} key={count}>{count} 张</option>)}</select><span className="field-help">首页安排新卡目标；完成后仍可继续首次学习。</span></label><label className="field">每日到期复习数<select value={dailyReviewTarget} onChange={(event) => setDailyReviewTarget(Number(event.target.value))}>{[0, 5, 10, 15, 20, 30].map((count) => <option value={count} key={count}>{count} 张</option>)}</select><span className="field-help">按 min(目标，到期数) 安排；你始终可以超额复习。</span></label><label className="field">默认答案比对<select value={answerComparisonMode} onChange={(event) => setAnswerComparisonMode(event.target.value as AnswerComparisonMode)}><option value="embedding">本地语义（首次自动下载模型）</option><option value="llm">LLM 判断（使用已配置模型）</option></select><span className="field-help">作答时仍可临时切换。LLM 模式会将参考答案与本次回答发送给当前服务商。</span></label><div className="form-actions"><Button onClick={save}><Save size={17}/> 保存学习偏好</Button><Button type="button" variant="outline" disabled={warmingModel} onClick={prewarmModel}>{warmingModel ? "正在预热本地模型…" : "预热本地语义模型"}</Button></div>{notice && <p className="muted-copy" role="status">{notice}</p>}</div></Panel>
+      <Panel data-tour="settings-goals"><div className="form-grid"><label className="field">每日首次学习数<select value={dailyInitialTarget} onChange={(event) => setDailyInitialTarget(Number(event.target.value))}>{[0, 3, 5, 8, 10, 15].map((count) => <option value={count} key={count}>{count} 张</option>)}</select><span className="field-help">首页安排新卡目标；完成后仍可继续首次学习。</span></label><label className="field">每日到期复习数<select value={dailyReviewTarget} onChange={(event) => setDailyReviewTarget(Number(event.target.value))}>{[0, 5, 10, 15, 20, 30].map((count) => <option value={count} key={count}>{count} 张</option>)}</select><span className="field-help">按 min(目标，到期数) 安排；你始终可以超额复习。</span></label><label className="field">默认答案比对<select value={answerComparisonMode} onChange={(event) => setAnswerComparisonMode(event.target.value as AnswerComparisonMode)}><option value="embedding">本地语义（bge-m3，首次后台下载）</option><option value="llm">LLM 判断（使用已配置模型）</option></select><span className="field-help">每次进入都会检查模型；未完成时会在后台续传下载。LLM 模式会将参考答案与本次回答发送给当前服务商。</span></label><div className="embedding-download-status" role="status" aria-live="polite"><strong>{embeddingStatus.state === "ready" ? "bge-m3 已就绪" : embeddingStatus.state === "retrying" ? `下载失败，正在第 ${embeddingStatus.attempt} 次重试` : embeddingStatus.state === "error" ? "bge-m3 下载失败" : "正在准备 bge-m3"}</strong><div className="embedding-status-step"><b>1. 下载向量模型</b><progress value={embeddingStatus.totalBytes ? embeddingStatus.downloadedBytes : undefined} max={embeddingStatus.totalBytes ?? undefined} /><span>{embeddingStatus.totalBytes ? `${sizeLabel(embeddingStatus.downloadedBytes)} / ${sizeLabel(embeddingStatus.totalBytes)} · ${Math.min(100, Math.round(embeddingStatus.downloadedBytes / embeddingStatus.totalBytes * 100))}%` : embeddingStatus.downloadedBytes ? `已下载 ${sizeLabel(embeddingStatus.downloadedBytes)}` : "等待开始"}</span></div><div className="embedding-status-step"><b>2. 解析 ONNX 模型</b><progress value={embeddingStatus.onnxState === "ready" ? 1 : embeddingStatus.onnxState === "parsing" ? undefined : 0} max={1} /><span>{embeddingStatus.onnxState === "ready" ? "解析并加载完成" : embeddingStatus.onnxState === "parsing" ? "正在由 ONNX Runtime 解析模型…" : embeddingStatus.onnxState === "failed" ? "解析失败，将清理损坏文件后重试" : "等待模型文件下载完成"}</span></div>{embeddingStatus.state === "ready" && <span>本地模型已缓存，可离线进行语义比对。</span>}{embeddingStatus.error && <span>{embeddingStatus.error}</span>}</div><div className="form-actions"><Button type="button" variant="outline" disabled={warmingModel || embeddingStatus.state === "downloading" || embeddingStatus.state === "retrying" || embeddingStatus.state === "verifying"} onClick={redownloadEmbeddingModel}>{warmingModel ? "正在启动下载…" : "重新下载向量模型"}</Button><Button onClick={save}><Save size={17}/> 保存学习偏好</Button></div>{notice && <p className="muted-copy" role="status">{notice}</p>}</div></Panel>
       <Panel className="environment-panel" data-tour="settings-model">
         <p className="eyebrow"><KeyRound size={15}/> 本地 .env.local</p><h2>模型服务</h2><p className="muted-copy">选择服务商、具体模型并填写 API Key；未列出的模型可直接自定义填写。</p>
         <div className="form-grid">

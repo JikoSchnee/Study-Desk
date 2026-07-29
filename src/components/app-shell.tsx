@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { BookOpenCheck, ClipboardList, FilePlus2, LibraryBig, Menu, Mic2, Settings, Sparkles, X } from "lucide-react";
 import { TourButton } from "@/components/tour";
+import { SemanticModelPrewarm } from "@/components/semantic-model-prewarm";
 
 const nav = [
   ["/", "今日", ClipboardList],
@@ -27,6 +28,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
   return <div className="app-frame">
+    <SemanticModelPrewarm />
     <aside className="side-nav" aria-label="主导航">
       <Link href="/" className="brand"><span>八</span><b>八股训练台</b></Link>
       <nav>{nav.map(([href, label, Icon]) => <Link key={href} href={href} data-tour={tourTargetForNav(href)} className={pathname === href ? "nav-item active" : "nav-item"}><Icon size={20} /><span>{label}</span></Link>)}</nav>
