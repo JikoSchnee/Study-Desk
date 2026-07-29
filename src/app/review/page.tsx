@@ -25,6 +25,8 @@ const queueCopy: Record<QueueKind, { label: string; title: string; description: 
   weak: { label: "薄弱复习", title: "把难点再练一遍。", description: "这里的练习不改变 FSRS 排程，只帮你集中补弱。", icon: Target },
 };
 
+const randomQueueCopy = { label: "随机抽题", title: "随手抽一题热身", description: "从题库随机抽取一张卡，随时练习，不影响 FSRS 复习排程。", icon: Dices };
+
 function progressText(stats: { pending: number; completedToday: number }) {
   return `今日完成 ${stats.completedToday} · 待完成 ${stats.pending}`;
 }
@@ -261,17 +263,18 @@ export default function ReviewPage() {
   if (!progress && session === null) return <div className="loading">正在准备今天的练习…</div>;
 
   if (session === null && progress) return <PageLayout>
-    <PageHeader eyebrow={<><BrainCircuit size={15}/> 主动回忆</>} title="今天想先练哪一类？" description="导入不会算作练习；第一次作答与之后的复习，会分别留下清晰记录。" tour="review" actions={<Button variant="secondary" onClick={loadRandom}><Dices size={17}/> 随机抽题</Button>} />
+    <PageHeader eyebrow={<><BrainCircuit size={15}/> 主动回忆</>} title="今天想先练哪一类？" description="导入不会算作练习；第一次作答与之后的复习，会分别留下清晰记录。" tour="review" />
     <section className="review-queue-grid" data-tour="review-initial" aria-label="选择练习队列">
-      {(["initial", "review", "weak"] as const).map((kind) => {
-        const copy = queueCopy[kind];
+      {(["initial", "review", "random", "weak"] as const).map((kind) => {
+        const isRandomQueue = kind === "random";
+        const copy = isRandomQueue ? randomQueueCopy : queueCopy[kind];
         const Icon = copy.icon;
-        const stats = progress[kind];
+        const stats = isRandomQueue ? { pending: 0, completedToday: 0 } : progress[kind];
         return <article className={`review-queue-card ${kind}`} key={kind} data-tour={kind === "initial" ? "review-initial-card" : undefined}>
           <div className="review-queue-icon"><Icon size={23}/></div>
-          <div><p className="eyebrow">{copy.label}</p><h2>{kind === "initial" ? "先把新题学明白" : kind === "review" ? "巩固已学内容" : "集中补弱"}</h2><p>{copy.description}</p></div>
-          <div className="review-queue-progress"><strong>{stats.pending}</strong><span>题待完成</span><small>{progressText(stats)}</small></div>
-          <Button disabled={!stats.pending} onClick={() => startQueue(kind)}>{stats.pending ? <>开始{copy.label}<ArrowRight size={17}/></> : "今日暂无待完成"}</Button>
+          <div><p className="eyebrow">{copy.label}</p><h2>{isRandomQueue ? copy.title : kind === "initial" ? "先把新题学明白" : kind === "review" ? "巩固已学内容" : "集中补弱"}</h2><p>{copy.description}</p></div>
+          <div className="review-queue-progress">{isRandomQueue ? <><strong>自由</strong><span>练习</span><small>不影响复习排程</small></> : <><strong>{stats.pending}</strong><span>题待完成</span><small>{progressText(stats)}</small></>}</div>
+          <Button disabled={!isRandomQueue && !stats.pending} onClick={() => { if (isRandomQueue) loadRandom(); else startQueue(kind); }}>{isRandomQueue ? <><Dices size={17}/> 随机抽题</> : stats.pending ? <>开始{copy.label}<ArrowRight size={17}/></> : "今日暂无待完成"}</Button>
         </article>;
       })}
     </section>
