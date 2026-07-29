@@ -5,6 +5,9 @@ const database = vi.hoisted(() => ({
   dueRows: [] as Array<{ id: string }>,
   queries: [] as string[],
   state: null as string | null,
+  dueAt: null as string | null,
+  hasInitialStudy: false,
+  hasRealPractice: false,
 }));
 const cards = vi.hoisted(() => ({
   rows: [
@@ -21,6 +24,9 @@ vi.mock("@/lib/db", () => ({
       return {
         get: () => {
           if (sql.startsWith("SELECT card_id FROM review_state")) return database.state ? { card_id: "learning-card" } : undefined;
+          if (sql.startsWith("SELECT due_at FROM review_state")) return database.dueAt ? { due_at: database.dueAt } : undefined;
+          if (sql.startsWith("SELECT completed_at FROM initial_study_logs")) return database.hasInitialStudy ? { completed_at: "2026-07-29T02:00:00.000Z" } : undefined;
+          if (sql.startsWith("SELECT id FROM review_logs")) return database.hasRealPractice ? { id: "log" } : undefined;
           if (sql.startsWith("SELECT fsrs_card FROM review_state")) return database.state ? { fsrs_card: database.state } : undefined;
           if (sql.includes("SELECT COUNT(*) AS count FROM cards WHERE")) return { count: 1 };
           if (sql.includes("SELECT COUNT(*) AS count FROM cards c JOIN")) return { count: database.dueRows.length };
@@ -31,7 +37,10 @@ vi.mock("@/lib/db", () => ({
         run: (...args: unknown[]) => {
           database.runs.push({ sql, args });
           if (sql.startsWith("INSERT INTO review_state")) database.state = String(args[1]);
+          if (sql.startsWith("INSERT INTO review_state")) database.dueAt = String(args[2]);
           if (sql.startsWith("UPDATE review_state")) database.state = String(args[0]);
+          if (sql.startsWith("INSERT INTO initial_study_logs")) database.hasInitialStudy = true;
+          if (sql.startsWith("INSERT INTO review_logs")) database.hasRealPractice = true;
           return {};
         },
       };
@@ -46,13 +55,16 @@ vi.mock("@/lib/cards", () => ({
   updateCardStatus: (id: string, status: string) => { cards.statusUpdates.push({ id, status }); },
 }));
 
-import { dueCards, initialCards, nextReviewCard, submitReview } from "@/lib/review";
+import { completeInitialStudy, dueCards, initialCards, nextReviewCard, submitReview } from "@/lib/review";
 
 beforeEach(() => {
   database.runs.length = 0;
   database.dueRows.length = 0;
   database.queries.length = 0;
   database.state = null;
+  database.dueAt = null;
+  database.hasInitialStudy = false;
+  database.hasRealPractice = false;
   cards.statusUpdates.length = 0;
 });
 
@@ -73,10 +85,34 @@ describe("first practice", () => {
     expect(second.isInitial).toBe(false);
     expect(logs[1]?.args[11]).toBe(0);
   });
+
+  it("records an unscored initial study once, then marks the first real recall as initial", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-29T10:30:00.000Z"));
+    try {
+      const study = completeInitialStudy("learning-card");
+      const firstState = database.runs.find((entry) => entry.sql.startsWith("INSERT INTO review_state"));
+
+      expect(study.dueAt).toBe("2026-07-29T22:00:00.000Z");
+      expect(firstState?.args[2]).toBe("2026-07-29T22:00:00.000Z");
+      expect(database.runs.filter((entry) => entry.sql.startsWith("INSERT INTO initial_study_logs"))).toHaveLength(1);
+      expect(database.runs.filter((entry) => entry.sql.startsWith("INSERT INTO review_logs"))).toHaveLength(0);
+
+      completeInitialStudy("learning-card");
+      expect(database.runs.filter((entry) => entry.sql.startsWith("INSERT INTO initial_study_logs"))).toHaveLength(1);
+
+      const firstRecall = submitReview("learning-card", "次日的第一次作答", 82, "good", "good");
+      const reviewStateInserts = database.runs.filter((entry) => entry.sql.startsWith("INSERT INTO review_state"));
+      const practiceLog = database.runs.find((entry) => entry.sql.startsWith("INSERT INTO review_logs"));
+      expect(firstRecall.isInitial).toBe(true);
+      expect(reviewStateInserts).toHaveLength(1);
+      expect(practiceLog?.args[11]).toBe(1);
+    } finally { vi.useRealTimers(); }
+  });
 });
 
 describe("review queues", () => {
-  it("keeps new cards in the initial-practice queue", () => {
+  it("keeps new cards in the initial-study queue", () => {
     expect(initialCards().map((card) => card.id)).toEqual(["learning-card"]);
   });
 
@@ -87,7 +123,7 @@ describe("review queues", () => {
     expect(database.queries.find((sql) => sql.includes("FROM cards c JOIN review_state"))).toContain("ORDER BY r.due_at ASC, c.id ASC");
   });
 
-  it("returns queue progress with the next initial-practice card", () => {
+  it("returns queue progress with the next initial-study card", () => {
     expect(nextReviewCard("initial").card?.id).toBe("learning-card");
     expect(nextReviewCard("initial").progress).toEqual({ initial: { pending: 1, completedToday: 0 }, review: { pending: 0, completedToday: 0 }, weak: { pending: 0, completedToday: 0 } });
   });

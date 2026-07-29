@@ -58,6 +58,7 @@ export interface Card {
 
 export interface CardLearningSummary {
   cardId: string;
+  initialStudyAt: string | null;
   nextReviewAt: string | null;
   lastReviewAt: string | null;
   practiceCount: number;

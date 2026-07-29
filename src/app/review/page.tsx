@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowRight, BookOpenCheck, BrainCircuit, ChevronLeft, ChevronRight, Dices, GraduationCap, Lightbulb, RefreshCw, Sparkles, Target } from "lucide-react";
+import { ArrowRight, BookOpenCheck, BrainCircuit, CheckCircle2, ChevronLeft, ChevronRight, Dices, Eye, GraduationCap, Lightbulb, RefreshCw, Sparkles, Target } from "lucide-react";
 import { Button, Chip, EmptyState } from "@/components/ui";
 import { PageHeader, PageLayout } from "@/components/page-layout";
 import { useTour } from "@/components/tour";
@@ -20,7 +20,7 @@ type SessionKind = QueueKind | "random";
 type QueueProgress = Record<QueueKind, { pending: number; completedToday: number }>;
 
 const queueCopy: Record<QueueKind, { label: string; title: string; description: string; icon: typeof GraduationCap }> = {
-  initial: { label: "首次练习", title: "先把新知识说出来。", description: "完成第一次真实作答后，系统才会开始安排复习。", icon: GraduationCap },
+  initial: { label: "首次学习", title: "先看懂，再复述。", description: "逐条看完答案要点，口头复述后，明天再进行第一次主动回忆。", icon: GraduationCap },
   review: { label: "到期复习", title: "把记忆再叫回来。", description: "按 FSRS 到期时间复习，稳住已经学过的内容。", icon: RefreshCw },
   weak: { label: "薄弱复习", title: "把难点再练一遍。", description: "这里的练习不改变 FSRS 排程，只帮你集中补弱。", icon: Target },
 };
@@ -56,6 +56,10 @@ export default function ReviewPage() {
   const [followUpBusy, setFollowUpBusy] = useState(false);
   const [followUpDraftBusy, setFollowUpDraftBusy] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const [revealedStudyPoints, setRevealedStudyPoints] = useState<number[]>([]);
+  const [spokenBack, setSpokenBack] = useState(false);
+  const [studyBusy, setStudyBusy] = useState(false);
+  const [studyError, setStudyError] = useState("");
   const semanticProgress = useSemanticComparisonProgress();
 
   const loadQueueProgress = useCallback(async () => {
@@ -87,6 +91,10 @@ export default function ReviewPage() {
     setFollowUpDraftBusy(false);
     setActiveHint(null);
     setPresentedQuestion("");
+    setRevealedStudyPoints([]);
+    setSpokenBack(false);
+    setStudyBusy(false);
+    setStudyError("");
     const query = nextSession === "random"
       ? (excludedIds.length ? `?${excludedIds.map((id) => `exclude=${encodeURIComponent(id)}`).join("&")}` : "")
       : `?queue=${nextSession}${requestedCardId ? `&cardId=${encodeURIComponent(requestedCardId)}` : ""}`;
@@ -188,6 +196,23 @@ export default function ReviewPage() {
   const loadRandom = useCallback(() => void loadSession("random", seenRandomIds), [loadSession, seenRandomIds]);
   const leaveSession = useCallback(() => { setSession(null); setCard(null); setEvaluation(null); void loadQueueProgress(); }, [loadQueueProgress]);
 
+  const completeStudy = useCallback(async (): Promise<string | void> => {
+    if (!card || session !== "initial") return "当前卡片无法完成首次学习。";
+    if (revealedStudyPoints.length < card.answerPoints.length || !spokenBack) return "请先看完全部要点，并完成口头复述。";
+    setStudyBusy(true); setStudyError("");
+    try {
+      const response = await fetch("/api/review/study", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cardId: card.id }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "无法完成首次学习。");
+      completeCheckpoint("initial-study-completed");
+      await loadSession("initial");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "无法完成首次学习。";
+      setStudyError(message);
+      return message;
+    } finally { setStudyBusy(false); }
+  }, [card, completeCheckpoint, loadSession, revealedStudyPoints.length, session, spokenBack]);
+
   const evaluate = useCallback(async (): Promise<string | void> => {
     if (!card || !answer.trim()) return "请先写一段自己的回答，下一步会用同一个提交操作生成报告。";
     setBusy(true); setSubmitError("");
@@ -210,25 +235,28 @@ export default function ReviewPage() {
     try {
       const result = await semanticProgress.request<{ error?: string }>("/api/review/submit", { action: "confirm", cardId: card.id, presentedQuestion, answer, rating, comparisonMode }, comparisonMode === "embedding");
       if (result.error) return result.error;
-      if (session === "initial") completeCheckpoint("initial-practice");
       window.localStorage.removeItem(`mock-interview:draft:${session}:${card.id}`);
       await loadSession(session);
     } catch { return "评级提交失败，请检查网络后重试。"; }
     finally { setBusy(false); }
-  }, [actOnFeedback, answer, card, comparisonMode, completeCheckpoint, loadSession, presentedQuestion, semanticProgress, session]);
+  }, [actOnFeedback, answer, card, comparisonMode, loadSession, presentedQuestion, semanticProgress, session]);
 
   useEffect(() => {
     if (activeId !== "onboarding" || session !== null) return;
     return registerTourAction("review-started", () => { startQueue("initial"); });
   }, [activeId, registerTourAction, session, startQueue]);
   useEffect(() => {
-    if (activeId !== "onboarding" || !session || evaluation) return;
-    return registerTourAction("answer-evaluated", evaluate);
-  }, [activeId, evaluation, registerTourAction, session, evaluate]);
-  useEffect(() => {
-    if (activeId !== "onboarding" || !evaluation || session !== "initial") return;
-    return registerTourAction("initial-practice", () => confirm(evaluation.suggestedRating));
-  }, [activeId, confirm, evaluation, registerTourAction, session]);
+    if (activeId !== "onboarding" || session !== "initial" || !card) return;
+    return registerTourAction("initial-study-completed", async () => {
+      setRevealedStudyPoints(card.answerPoints.map((_, index) => index));
+      setSpokenBack(true);
+      const response = await fetch("/api/review/study", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cardId: card.id }) });
+      const data = await response.json();
+      if (!response.ok) return data.error ?? "无法完成首次学习。";
+      completeCheckpoint("initial-study-completed");
+      await loadSession("initial");
+    });
+  }, [activeId, card, completeCheckpoint, loadSession, registerTourAction, session]);
 
   if (!progress && session === null) return <div className="loading">正在准备今天的练习…</div>;
 
@@ -241,7 +269,7 @@ export default function ReviewPage() {
         const stats = progress[kind];
         return <article className={`review-queue-card ${kind}`} key={kind} data-tour={kind === "initial" ? "review-initial-card" : undefined}>
           <div className="review-queue-icon"><Icon size={23}/></div>
-          <div><p className="eyebrow">{copy.label}</p><h2>{kind === "initial" ? "从新题开始" : kind === "review" ? "巩固已学内容" : "集中补弱"}</h2><p>{copy.description}</p></div>
+          <div><p className="eyebrow">{copy.label}</p><h2>{kind === "initial" ? "先把新题学明白" : kind === "review" ? "巩固已学内容" : "集中补弱"}</h2><p>{copy.description}</p></div>
           <div className="review-queue-progress"><strong>{stats.pending}</strong><span>题待完成</span><small>{progressText(stats)}</small></div>
           <Button disabled={!stats.pending} onClick={() => startQueue(kind)}>{stats.pending ? <>开始{copy.label}<ArrowRight size={17}/></> : "今日暂无待完成"}</Button>
         </article>;
@@ -276,12 +304,25 @@ export default function ReviewPage() {
   const stats = !isRandom ? progress?.[queue] : null;
   const sessionCopy = !isRandom ? queueCopy[queue] : null;
 
+  const allStudyPointsRevealed = revealedStudyPoints.length === activeCard.answerPoints.length;
+  const revealStudyPoint = (index: number) => setRevealedStudyPoints((current) => current.includes(index) ? current : [...current, index]);
+
   return <PageLayout>
     <SemanticComparisonProgress open={semanticProgress.open} progress={semanticProgress.progress}/>
-    <PageHeader eyebrow={<><BrainCircuit size={15}/> {isRandom ? "随机练习" : sessionCopy?.label}</>} title={isRandom ? "随机抽一题，说说看。" : isInitial ? "先想，再说出来。" : queue === "weak" ? "把难点练扎实。" : "把记忆再叫回来。"} description={isRandom ? "这次练习只提供反馈，不会影响复习排程。" : isInitial ? "这是第一次真实作答；确认记忆状态后，才会开始进入复习节奏。" : queue === "weak" ? "薄弱复习不改变排程，练好后可以把它移出队列。" : "说不完整没关系，关键是把思路调出来。"} tour="review" actions={<>{isRandom ? <Chip tone="blue">随机练习</Chip> : stats && <Chip tone={isInitial ? "green" : "blue"}>{progressText(stats)}</Chip>}<Button variant="secondary" onClick={isRandom ? loadRandom : leaveSession}>{isRandom ? <><Dices size={17}/> 再抽一题</> : "切换练习"}</Button></>} />
+    <PageHeader eyebrow={<><BrainCircuit size={15}/> {isRandom ? "随机练习" : sessionCopy?.label}</>} title={isRandom ? "随机抽一题，说说看。" : isInitial ? "先看懂，再说出来。" : queue === "weak" ? "把难点练扎实。" : "把记忆再叫回来。"} description={isRandom ? "这次练习只提供反馈，不会影响复习排程。" : isInitial ? "这不是考试：逐条看完答案要点，口头复述后，明天再进行第一次主动回忆。" : queue === "weak" ? "薄弱复习不改变排程，练好后可以把它移出队列。" : "说不完整没关系，关键是把思路调出来。"} tour="review" actions={<>{isRandom ? <Chip tone="blue">随机练习</Chip> : stats && <Chip tone={isInitial ? "green" : "blue"}>{progressText(stats)}</Chip>}<Button variant="secondary" onClick={isRandom ? loadRandom : leaveSession}>{isRandom ? <><Dices size={17}/> 再抽一题</> : "切换练习"}</Button></>} />
     <article className="review-card page-focus-content">
-      <div><div className="review-question-heading"><p className="eyebrow">问题</p>{isInitial ? <Chip tone="green">首次练习</Chip> : difficulty && <span className={`difficulty-badge difficulty-${difficulty.label.toLowerCase()}`} title={`FSRS 难度 ${learning?.fsrsDifficulty?.toFixed(1)} / 10`}>难度 {difficulty.label}<small>{learning?.fsrsDifficulty?.toFixed(1)}</small></span>}</div><h2 className="review-question">{presentedQuestion}</h2></div>
-      {!evaluation ? <div className="form-grid" data-tour="review-answer">
+      <div><div className="review-question-heading"><p className="eyebrow">问题</p>{isInitial ? <Chip tone="green">首次学习</Chip> : difficulty && <span className={`difficulty-badge difficulty-${difficulty.label.toLowerCase()}`} title={`FSRS 难度 ${learning?.fsrsDifficulty?.toFixed(1)} / 10`}>难度 {difficulty.label}<small>{learning?.fsrsDifficulty?.toFixed(1)}</small></span>}</div><h2 className="review-question">{presentedQuestion}</h2></div>
+      {isInitial ? <section className="initial-study-flow" data-tour="initial-study-flow" aria-label="首次学习步骤">
+        <div className="initial-study-intro"><div className="initial-study-orb"><GraduationCap size={24}/></div><div><p className="eyebrow">先理解，再回忆</p><h3>沿着提示，逐条看懂答案。</h3><p>每个要点先给出一个线索；点击后查看完整解释。不会评分，也不会记录为作答。</p></div></div>
+        <ol className="initial-study-points">
+          {activeCard.answerPoints.map((point, index) => {
+            const revealed = revealedStudyPoints.includes(index);
+            return <li className={revealed ? "revealed" : ""} key={point.id}><div className="initial-study-point-number">{revealed ? <CheckCircle2 size={17}/> : index + 1}</div><div><p className="eyebrow">要点 {index + 1}</p>{revealed ? <p className="initial-study-answer">{point.content}</p> : <><p className="initial-study-hint"><Lightbulb size={16}/>{point.hint.trim() || "先用自己的话想一想这个关键点。"}</p><Button type="button" variant="secondary" onClick={() => revealStudyPoint(index)}><Eye size={16}/> 查看完整要点</Button></>}</div></li>;
+          })}
+        </ol>
+        {allStudyPointsRevealed && <div className="initial-study-recall"><div><p className="eyebrow">合上答案，试着说一遍</p><h3>用自己的话复述核心逻辑。</h3><p>不用输入或评分；只要能把关键点串起来，就可以继续。</p></div><label><input type="checkbox" checked={spokenBack} onChange={(event) => setSpokenBack(event.target.checked)}/> 我已完成口头复述</label></div>}
+        <div className="form-actions initial-study-actions"><small>{allStudyPointsRevealed ? "完成后，第一次正式主动回忆会安排在明天上午。" : `还需查看 ${activeCard.answerPoints.length - revealedStudyPoints.length} 个要点`}</small><Button disabled={!allStudyPointsRevealed || !spokenBack || studyBusy} onClick={() => void completeStudy()}>{studyBusy ? "正在安排复习…" : <><CheckCircle2 size={17}/> 完成首次学习</>}</Button>{studyError && <span className="danger" role="alert">{studyError}</span>}</div>
+      </section> : !evaluation ? <div className="form-grid" data-tour="review-answer">
         {activeHint !== null && <section className="review-hints" aria-live="polite" aria-label="回忆提示" tabIndex={0} onKeyDown={handleHintKeys}><div className="review-hint"><Lightbulb size={17}/><div className="review-hint-content"><div className="hint-title"><strong>提示 {activeHint + 1}/{hints.length}</strong><span>可用左右方向键切换</span></div><p>{hints[activeHint]}</p><div className="hint-navigation"><button type="button" aria-label="上一条提示" disabled={activeHint === 0} onClick={() => switchHint(-1)}><ChevronLeft size={17}/> 上一条</button><span>{activeHint + 1} / {hints.length}</span><button type="button" aria-label="下一条提示" disabled={activeHint === hints.length - 1} onClick={() => switchHint(1)}>下一条 <ChevronRight size={17}/></button></div></div></div></section>}
         <textarea className="answer" value={answer} onChange={(event) => setAnswer(event.target.value)} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); void evaluate(); } }} placeholder="建议按要点分行作答（如 1. … 换行 2. …），识别和高亮效果最佳。" />
         <ComparisonModeControl mode={comparisonMode} onChange={setComparisonMode} llmConfigured={llmConfigured} compact />

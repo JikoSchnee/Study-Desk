@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { generateQuestionVariants, parseGeneratedFollowUpCardDraft, parseGeneratedQuestionVariants } from "./ai";
+import type { Card } from "./types";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -53,9 +54,9 @@ describe("AI question variant parsing", () => {
 });
 
 describe("AI follow-up card drafts", () => {
-  const card = {
+  const card: Card = {
     id: "source-card", question: "什么是 RAG？", questionVariants: [], relations: [], answer: "检索增强生成", answerPoints: [{ id: "p1", content: "检索外部知识", hint: "检索", note: "" }], note: "", track: "Agent", tags: ["RAG"], difficulty: 3, status: "learning", createdAt: "2026-01-01", updatedAt: "2026-01-01",
-  } as const;
+  };
 
   it("keeps the generated follow-up as the question and maps source-parent to a child relation", () => {
     const draft = parseGeneratedFollowUpCardDraft(JSON.stringify({ answerPoints: [{ content: "重排序提升候选文档的相关性。", hint: "精排" }], questionVariants: ["为什么 RAG 需要精排？", "为什么 RAG 需要精排？"], note: "聚焦召回后的排序。", track: "Agent", tags: ["RAG", "重排序", "重排序"], relationToSource: "source_parent" }), card, "RAG 为什么需要重排序？");

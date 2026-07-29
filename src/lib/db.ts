@@ -16,6 +16,7 @@ sqlite.exec(`
   CREATE TABLE IF NOT EXISTS card_relations (card_id TEXT NOT NULL, related_card_id TEXT NOT NULL, relation_type TEXT NOT NULL DEFAULT 'related', created_at TEXT NOT NULL, PRIMARY KEY (card_id, related_card_id));
   CREATE TABLE IF NOT EXISTS review_state (card_id TEXT PRIMARY KEY, fsrs_card TEXT NOT NULL, due_at TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS review_logs (id TEXT PRIMARY KEY, card_id TEXT NOT NULL, response TEXT NOT NULL, ai_score INTEGER NOT NULL, suggested_rating TEXT NOT NULL, confirmed_rating TEXT NOT NULL, comparison_mode TEXT, answer_comparison TEXT, presented_question TEXT, feedback TEXT, next_due_at TEXT, is_initial INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS initial_study_logs (card_id TEXT PRIMARY KEY, completed_at TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS daily_plans (date TEXT PRIMARY KEY, budget_minutes INTEGER NOT NULL, created_at TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS daily_tasks (id TEXT PRIMARY KEY, plan_date TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL, detail TEXT, card_id TEXT, estimate_minutes INTEGER NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS interview_sessions (id TEXT PRIMARY KEY, config TEXT NOT NULL, status TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT);

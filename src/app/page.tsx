@@ -46,7 +46,7 @@ export default function TodayPage() {
       catch { setActive(true); }
       finally { setStarting(false); }
     };
-    return <section className="tutorial-panel" data-tour="home-tutorial"><div><p className="eyebrow">基础教程</p><h2>3 分钟，完成第一轮训练</h2><p>自动准备一张演示卡，真实作答一次，再看看它如何进入后续复习与管理。</p></div><div className="tutorial-launcher" style={{ transform: `translateY(${offset}px)` }}><Button disabled={starting} onClick={() => void launch()}><BookOpen size={17}/> {starting ? "正在准备样例…" : "开始基础教程"}</Button></div></section>;
+    return <section className="tutorial-panel" data-tour="home-tutorial"><div><p className="eyebrow">基础教程</p><h2>3 分钟，完成首次学习</h2><p>自动准备一张演示卡，逐条看懂答案要点，再看看它如何进入后续复习与管理。</p></div><div className="tutorial-launcher" style={{ transform: `translateY(${offset}px)` }}><Button disabled={starting} onClick={() => void launch()}><BookOpen size={17}/> {starting ? "正在准备样例…" : "开始基础教程"}</Button></div></section>;
   };
   return <>
     <section className="today-hero">

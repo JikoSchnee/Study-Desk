@@ -4,6 +4,7 @@ import type { AnswerComparison, AnswerComparisonMode, CardLearningDetails, CardL
 
 type SummaryRow = {
   card_id: string;
+  initial_study_at: string | null;
   due_at: string | null;
   last_review_at: string | null;
   practice_count: number;
@@ -54,6 +55,7 @@ function fsrsDifficulty(value: string | null): number | null {
 function summaryFrom(row: SummaryRow): CardLearningSummary {
   return {
     cardId: row.card_id,
+    initialStudyAt: row.initial_study_at,
     nextReviewAt: row.due_at,
     lastReviewAt: row.last_review_at,
     practiceCount: Number(row.practice_count),
@@ -68,15 +70,16 @@ export function cardLearningSummaries(cardIds: string[]): Record<string, CardLea
   if (!cardIds.length) return {};
   const placeholders = cardIds.map(() => "?").join(", ");
   const rows = sqlite.prepare(`
-    SELECT c.id AS card_id, r.due_at, r.fsrs_card, MAX(l.created_at) AS last_review_at,
+    SELECT c.id AS card_id, s.completed_at AS initial_study_at, r.due_at, r.fsrs_card, MAX(l.created_at) AS last_review_at,
       COUNT(l.id) AS practice_count, SUM(CASE WHEN l.is_initial = 0 THEN 1 ELSE 0 END) AS review_count,
       MAX(CASE WHEN l.is_initial = 1 THEN 1 ELSE 0 END) AS has_initial_practice,
       AVG(l.ai_score) AS average_score
     FROM cards c
+    LEFT JOIN initial_study_logs s ON s.card_id = c.id
     LEFT JOIN review_state r ON r.card_id = c.id
     LEFT JOIN review_logs l ON l.card_id = c.id
     WHERE c.id IN (${placeholders})
-    GROUP BY c.id, r.due_at
+    GROUP BY c.id, s.completed_at, r.due_at
   `).all(...cardIds) as SummaryRow[];
   return Object.fromEntries(rows.map((row) => {
     const summary = summaryFrom(row);
@@ -87,6 +90,7 @@ export function cardLearningSummaries(cardIds: string[]): Record<string, CardLea
 export function cardLearningDetails(cardId: string): CardLearningDetails {
   const summary = cardLearningSummaries([cardId])[cardId] ?? {
     cardId,
+    initialStudyAt: null,
     nextReviewAt: null,
     lastReviewAt: null,
     practiceCount: 0,

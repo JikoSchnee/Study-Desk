@@ -10,7 +10,7 @@ vi.mock("@/lib/review", () => ({
 import { GET } from "@/app/api/review/queue/route";
 
 describe("GET /api/review/queue", () => {
-  it("returns separate first-practice and due-review progress", async () => {
+  it("returns separate initial-study and due-review progress", async () => {
     const response = await GET();
 
     expect(await response.json()).toEqual({ progress: { initial: { pending: 4, completedToday: 1 }, review: { pending: 2, completedToday: 3 } } });

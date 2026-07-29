@@ -3,7 +3,7 @@ import { createEmptyCard, fsrs, generatorParameters, Rating } from "ts-fsrs";
 import { randomUUID } from "node:crypto";
 import { sqlite } from "@/lib/db";
 import { getCard, listCards, updateCardStatus } from "@/lib/cards";
-import { shanghaiDayBounds } from "@/lib/utils";
+import { nextShanghaiMorning, shanghaiDayBounds } from "@/lib/utils";
 import { completeTodayTaskForCard } from "@/lib/planner";
 import { clearPriorityPractice, focusedCards, isPriorityPractice } from "@/lib/practice-focus";
 import type { AnswerComparison, Card, RatingName } from "@/lib/types";
@@ -36,13 +36,40 @@ function scheduleCard(current: Record<string, unknown>, rating: RatingName, revi
   }
 }
 
-/** Creates a blank FSRS state only when the user confirms their first real answer. */
+/** Creates a blank FSRS state when one was not prepared by the initial-study flow. */
 export function initializeReview(cardId: string) {
   const existing = sqlite.prepare("SELECT card_id FROM review_state WHERE card_id = ?").get(cardId);
   if (existing) return false;
   const card = createEmptyCard(new Date());
   sqlite.prepare("INSERT INTO review_state (card_id, fsrs_card, due_at) VALUES (?, ?, ?)").run(cardId, JSON.stringify(card), new Date().toISOString());
   return true;
+}
+
+function hasRealPractice(cardId: string) {
+  return Boolean(sqlite.prepare("SELECT id FROM review_logs WHERE card_id = ? LIMIT 1").get(cardId));
+}
+
+/** Marks a card as studied without treating reading as a scored review. Safe to retry. */
+export function completeInitialStudy(cardId: string) {
+  const card = getCard(cardId);
+  if (!card) throw new Error("找不到卡片。");
+  const existing = sqlite.prepare("SELECT completed_at FROM initial_study_logs WHERE card_id = ?").get(cardId) as { completed_at: string } | undefined;
+  if (existing) {
+    const state = sqlite.prepare("SELECT due_at FROM review_state WHERE card_id = ?").get(cardId) as { due_at: string } | undefined;
+    return { dueAt: state?.due_at ?? null, card };
+  }
+  if (card.status !== "learning") throw new Error("这张卡片已不在首次学习队列中。");
+  const completedAt = new Date().toISOString();
+  const dueAt = nextShanghaiMorning(new Date(completedAt));
+  const fsrsCard = createEmptyCard(new Date(completedAt)) as unknown as Record<string, unknown>;
+  fsrsCard.due = new Date(dueAt);
+  sqlite.transaction(() => {
+    sqlite.prepare("INSERT INTO initial_study_logs (card_id, completed_at) VALUES (?, ?)").run(cardId, completedAt);
+    sqlite.prepare("INSERT INTO review_state (card_id, fsrs_card, due_at) VALUES (?, ?, ?)").run(cardId, JSON.stringify(fsrsCard), dueAt);
+    sqlite.prepare("UPDATE cards SET status = 'review', updated_at = ? WHERE id = ?").run(completedAt, cardId);
+    completeTodayTaskForCard(cardId, "learn");
+  })();
+  return { dueAt, card: getCard(cardId) };
 }
 
 export function initialCards() {
@@ -62,11 +89,11 @@ export function reviewQueueProgress(): ReviewQueueProgress {
   const { start, end } = shanghaiDayBounds();
   const completed = sqlite.prepare(`
     SELECT
-      COALESCE(SUM(CASE WHEN is_initial = 1 THEN 1 ELSE 0 END), 0) AS initial_count,
-      COALESCE(SUM(CASE WHEN is_initial = 0 THEN 1 ELSE 0 END), 0) AS review_count
-    FROM review_logs
+      (SELECT COUNT(*) FROM initial_study_logs WHERE completed_at >= ? AND completed_at < ?) AS initial_count,
+      COALESCE(SUM(CASE WHEN l.is_initial = 0 OR EXISTS (SELECT 1 FROM initial_study_logs s WHERE s.card_id = l.card_id) THEN 1 ELSE 0 END), 0) AS review_count
+    FROM review_logs l
     WHERE created_at >= ? AND created_at < ?
-  `).get(start, end) as { initial_count: number; review_count: number };
+  `).get(start, end, start, end) as { initial_count: number; review_count: number };
   return {
     initial: { pending: Number(initial.count), completedToday: Number(completed.initial_count) },
     review: { pending: Number(review.count), completedToday: Number(completed.review_count) },
@@ -81,7 +108,8 @@ export function nextReviewCard(kind: ReviewQueueKind, requestedCardId?: string |
 }
 
 export function submitReview(cardId: string, response: string, score: number, suggestedRating: RatingName, confirmedRating: RatingName, comparison?: AnswerComparison, presentedQuestion?: string, feedback?: string) {
-  const isInitial = initializeReview(cardId);
+  const isInitial = !hasRealPractice(cardId);
+  initializeReview(cardId);
   const reviewedAt = new Date().toISOString();
   const row = sqlite.prepare("SELECT fsrs_card FROM review_state WHERE card_id = ?").get(cardId) as { fsrs_card: string };
   const next = scheduleCard(JSON.parse(row.fsrs_card), confirmedRating, new Date());
@@ -91,7 +119,7 @@ export function submitReview(cardId: string, response: string, score: number, su
     sqlite.prepare("INSERT INTO review_logs (id, card_id, response, ai_score, suggested_rating, confirmed_rating, comparison_mode, answer_comparison, presented_question, feedback, next_due_at, is_initial, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
       .run(randomUUID(), cardId, response, score, suggestedRating, confirmedRating, comparison?.requestedMode ?? null, comparison ? JSON.stringify(comparison) : null, presentedQuestion ?? null, feedback ?? null, due, isInitial ? 1 : 0, reviewedAt);
     updateCardStatus(cardId, "review");
-    completeTodayTaskForCard(cardId, isInitial);
+    completeTodayTaskForCard(cardId, "review");
     clearPriorityPractice(cardId);
   })();
   return { dueAt: due, card: getCard(cardId), isInitial };

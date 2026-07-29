@@ -44,9 +44,8 @@ export function updateTask(id: string, status: "todo" | "done" | "skipped") {
   return sqlite.prepare("SELECT * FROM daily_tasks WHERE id = ?").get(id);
 }
 
-/** A plan is progress, not a checkbox: completing the real review completes its task. */
-export function completeTodayTaskForCard(cardId: string, isInitial: boolean) {
-  const kind = isInitial ? "learn" : "review";
+/** A plan is progress, not a checkbox: completing the matching learning action completes its task. */
+export function completeTodayTaskForCard(cardId: string, kind: "learn" | "review") {
   sqlite.prepare("UPDATE daily_tasks SET status = 'done' WHERE plan_date = ? AND card_id = ? AND kind = ? AND status = 'todo'")
     .run(todayShanghai(), cardId, kind);
 }

@@ -9,8 +9,8 @@ const cards: Card[] = [
 ];
 
 const learning: Record<string, CardLearningSummary> = {
-  a: { cardId: "a", nextReviewAt: "2026-01-10T00:00:00.000Z", lastReviewAt: "2026-01-09T00:00:00.000Z", practiceCount: 2, reviewCount: 1, hasInitialPractice: true, averageScore: 88, fsrsDifficulty: 6.4 },
-  b: { cardId: "b", nextReviewAt: "2026-01-08T00:00:00.000Z", lastReviewAt: "2026-01-10T00:00:00.000Z", practiceCount: 1, reviewCount: 0, hasInitialPractice: true, averageScore: null, fsrsDifficulty: 2.8 },
+  a: { cardId: "a", initialStudyAt: "2026-01-01T00:00:00.000Z", nextReviewAt: "2026-01-10T00:00:00.000Z", lastReviewAt: "2026-01-09T00:00:00.000Z", practiceCount: 2, reviewCount: 1, hasInitialPractice: true, averageScore: 88, fsrsDifficulty: 6.4 },
+  b: { cardId: "b", initialStudyAt: "2026-01-01T00:00:00.000Z", nextReviewAt: "2026-01-08T00:00:00.000Z", lastReviewAt: "2026-01-10T00:00:00.000Z", practiceCount: 1, reviewCount: 0, hasInitialPractice: true, averageScore: null, fsrsDifficulty: 2.8 },
 };
 
 describe("card filters", () => {

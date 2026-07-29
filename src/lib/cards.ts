@@ -144,6 +144,7 @@ export function permanentlyDeleteCards(ids: string[]) {
       sqlite.prepare("DELETE FROM practice_focus WHERE card_id = ?").run(id);
       sqlite.prepare("DELETE FROM review_state WHERE card_id = ?").run(id);
       sqlite.prepare("DELETE FROM review_logs WHERE card_id = ?").run(id);
+      sqlite.prepare("DELETE FROM initial_study_logs WHERE card_id = ?").run(id);
       sqlite.prepare("DELETE FROM daily_tasks WHERE card_id = ?").run(id);
       sqlite.prepare("DELETE FROM interview_turns WHERE card_id = ?").run(id);
       sqlite.prepare("DELETE FROM knowledge_maintenance_proposals WHERE card_id = ?").run(id);

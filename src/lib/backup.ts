@@ -1,8 +1,8 @@
 import "server-only";
 import { sqlite } from "@/lib/db";
 
-export const BACKUP_VERSION = 3;
-const tables = ["cards", "card_relations", "review_state", "review_logs", "daily_plans", "daily_tasks", "interview_sessions", "interview_turns", "knowledge_maintenance_proposals", "knowledge_sync_records", "practice_focus", "settings"] as const;
+export const BACKUP_VERSION = 4;
+const tables = ["cards", "card_relations", "review_state", "review_logs", "initial_study_logs", "daily_plans", "daily_tasks", "interview_sessions", "interview_turns", "knowledge_maintenance_proposals", "knowledge_sync_records", "practice_focus", "settings"] as const;
 type BackupTable = (typeof tables)[number];
 export type AppBackup = { version: number; exportedAt: string; tables: Record<BackupTable, Record<string, unknown>[]> };
 
@@ -13,14 +13,15 @@ export function createBackup(): AppBackup {
 export function parseBackup(value: unknown): AppBackup {
   if (!value || typeof value !== "object") throw new Error("备份文件不是有效 JSON 对象。");
   const backup = value as Partial<AppBackup>;
-  if ((backup.version !== 1 && backup.version !== 2 && backup.version !== BACKUP_VERSION) || !backup.tables || typeof backup.tables !== "object") throw new Error("不支持此备份版本。");
-  const legacyTables = tables.filter((table) => table !== "card_relations");
+  if ((backup.version !== 1 && backup.version !== 2 && backup.version !== 3 && backup.version !== BACKUP_VERSION) || !backup.tables || typeof backup.tables !== "object") throw new Error("不支持此备份版本。");
+  const legacyTables = tables.filter((table) => table !== "card_relations" && table !== "initial_study_logs");
   for (const table of legacyTables) if (!Array.isArray(backup.tables[table])) throw new Error(`备份缺少 ${table} 数据。`);
-  if (backup.version === BACKUP_VERSION && !Array.isArray(backup.tables.card_relations)) throw new Error("备份缺少 card_relations 数据。");
-  return { version: BACKUP_VERSION, exportedAt: backup.exportedAt ?? new Date().toISOString(), tables: { ...backup.tables, card_relations: Array.isArray(backup.tables.card_relations) ? backup.tables.card_relations : [] } } as AppBackup;
+  if (backup.version >= 3 && !Array.isArray(backup.tables.card_relations)) throw new Error("备份缺少 card_relations 数据。");
+  if (backup.version === BACKUP_VERSION && !Array.isArray(backup.tables.initial_study_logs)) throw new Error("备份缺少 initial_study_logs 数据。");
+  return { version: BACKUP_VERSION, exportedAt: backup.exportedAt ?? new Date().toISOString(), tables: { ...backup.tables, card_relations: Array.isArray(backup.tables.card_relations) ? backup.tables.card_relations : [], initial_study_logs: Array.isArray(backup.tables.initial_study_logs) ? backup.tables.initial_study_logs : [] } } as AppBackup;
 }
 
-const primaryKey: Record<Exclude<BackupTable, "card_relations">, string> = { cards: "id", review_state: "card_id", review_logs: "id", daily_plans: "date", daily_tasks: "id", interview_sessions: "id", interview_turns: "id", knowledge_maintenance_proposals: "id", knowledge_sync_records: "id", practice_focus: "card_id", settings: "key" };
+const primaryKey: Record<Exclude<BackupTable, "card_relations">, string> = { cards: "id", review_state: "card_id", review_logs: "id", initial_study_logs: "card_id", daily_plans: "date", daily_tasks: "id", interview_sessions: "id", interview_turns: "id", knowledge_maintenance_proposals: "id", knowledge_sync_records: "id", practice_focus: "card_id", settings: "key" };
 
 function insert(table: BackupTable, row: Record<string, unknown>) {
   const keys = Object.keys(row);

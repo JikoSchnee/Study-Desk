@@ -12,24 +12,22 @@ const tours: Record<TourId, Step[]> = {
   onboarding: [
     { selector: '[data-tour="nav-cards"]', title: "切换到录入", detail: "点击“录入”，我们会在手动录入表单里打开这张演示卡。", advanceOnPath: "/cards" },
     { selector: '[data-tour="tutorial-card-editor"]', title: "像平常一样修改卡片", detail: "这里就是日常手动录入表单。可以直接修改问题、答案要点、提示、类型和标签，然后保存这张演示卡。", checkpoint: "tutorial-card-saved" },
-    { selector: '[data-tour="nav-review"]', title: "切换到复习", detail: "点击“复习”，用刚刚保存的演示卡完成首次练习。", advanceOnPath: "/review" },
-    { selector: '[data-tour="review-initial-card"]', title: "开始首次练习", detail: "只需点击这张“首次练习”卡。教程会精确安排刚才保存的演示卡。", checkpoint: "review-started" },
-    { selector: '[data-tour="review-answer"]', title: "先回忆，再作答", detail: "先用自己的话回答；提示、语音和比对模式都可以按需使用。提交成功后会展示完整答案报告。", checkpoint: "answer-evaluated" },
-    { selector: '[data-tour="review-report"]', title: "查看答案报告", detail: "这里汇总得分、遗漏要点、答案对照和下一步动作。看完后继续确认本次记忆状态。" },
-    { selector: '[data-tour="review-rating"]', title: "确认记忆状态", detail: "选择一个评级完成真实首次练习，系统会据此安排后续复习。", checkpoint: "initial-practice" },
+    { selector: '[data-tour="nav-review"]', title: "切换到学习", detail: "点击“学习”，用刚刚保存的演示卡完成首次学习。", advanceOnPath: "/review" },
+    { selector: '[data-tour="review-initial-card"]', title: "开始首次学习", detail: "只需点击这张“首次学习”卡。教程会精确安排刚才保存的演示卡。", checkpoint: "review-started" },
+    { selector: '[data-tour="initial-study-flow"]', title: "先看懂，再复述", detail: "首次学习不会要求默写或评分：逐条查看答案要点，口头复述后，明天再进行第一次主动回忆。", checkpoint: "initial-study-completed" },
     { selector: '[data-tour="nav-library"]', title: "切换到卡片库", detail: "点击“卡片库”，最后看看这张演示卡如何归档或永久删除。", advanceOnPath: "/library" },
     { selector: '[data-tour="tutorial-library-card"]', title: "管理演示卡", detail: "这张演示卡现在就在卡片库中。你可以归档，或永久删除并清除它的学习记录。" },
   ],
   today: [
     { selector: '[data-tour="today-summary"]', title: "今天的全景", detail: "这里汇总待复习、今日完成和任务进度。" },
-    { selector: '[data-tour="home-tutorial"]', title: "基础教程", detail: "随时从这里重新走一遍录入到首次练习的最短路径。" },
-    { selector: '[data-tour="daily-tasks"]', title: "任务路径", detail: "开始任务会直达对应卡片；真实完成作答后进度自动同步。" },
+    { selector: '[data-tour="home-tutorial"]', title: "基础教程", detail: "随时从这里重新走一遍录入到首次学习的最短路径。" },
+    { selector: '[data-tour="daily-tasks"]', title: "任务路径", detail: "开始任务会直达对应卡片；完成首学或真实复习后进度自动同步。" },
     { selector: '[data-tour="training-calendar"]', title: "训练日历", detail: "按日期查看计划完成情况，持续练习会在这里留下轨迹。" },
   ],
   cards: [
     { selector: '[data-tour="card-composer"]', title: "手动录入", detail: "一张卡聚焦一个知识点：问题清楚、答案要点可验证。" },
     { selector: '[data-tour="answer-points"]', title: "答案要点与提示", detail: "把答案拆开，后续比对才能指出具体遗漏。" },
-    { selector: '[data-tour="card-save"]', title: "保存并学习", detail: "保存后卡片进入首次练习队列；也可以从文件导入已有资料。" },
+    { selector: '[data-tour="card-save"]', title: "保存并学习", detail: "保存后卡片进入首次学习队列；也可以从文件导入已有资料。" },
   ],
   library: [
     { selector: '[data-tour="library-filters"]', title: "查找卡片", detail: "按关键词、类型、标签和学习状态筛选你的内容。" },
@@ -37,7 +35,7 @@ const tours: Record<TourId, Step[]> = {
     { selector: '[data-tour="library-card"]', title: "查看学习轨迹", detail: "打开卡片详情可回放作答、得分和 FSRS 复习间隔。" },
   ],
   review: [
-    { selector: '[data-tour="review-initial"]', title: "选择练习队列", detail: "首次练习、到期复习和薄弱复习彼此独立；完成目标后仍可继续练。" },
+    { selector: '[data-tour="review-initial"]', title: "选择学习队列", detail: "首次学习、到期复习和薄弱复习彼此独立；完成目标后仍可继续练。" },
     { selector: '[data-tour="review-answer"]', title: "作答与提示", detail: "先回答，再看提示。⌘/Ctrl + Enter 可以快速提交。" },
     { selector: '[data-tour="review-rating"]', title: "确认记忆状态", detail: "这是每次练习必经的一步；完成后可按需展开可选回流操作。" },
   ],
@@ -148,6 +146,6 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
     if (rect.left >= width + gap) return { left: gap, right: "auto", width };
     return undefined;
   }, [rect]);
-  const nextLabel = step?.advanceOnPath ? "下一步：切换页面" : step?.checkpoint === "tutorial-card-saved" ? "下一步：保存演示卡" : step?.checkpoint === "review-started" ? "下一步：开始首次练习" : step?.checkpoint === "answer-evaluated" ? "下一步：提交答案" : step?.checkpoint === "initial-practice" ? "下一步：按建议评级" : index >= active.length - 1 ? "完成教程" : "下一步";
+  const nextLabel = step?.advanceOnPath ? "下一步：切换页面" : step?.checkpoint === "tutorial-card-saved" ? "下一步：保存演示卡" : step?.checkpoint === "review-started" ? "下一步：开始首次学习" : step?.checkpoint === "initial-study-completed" ? "下一步：完成首学" : index >= active.length - 1 ? "完成教程" : "下一步";
   return <TourContext.Provider value={{ startTour, startOnboarding, completeCheckpoint, registerTourAction, activeId, tutorialCardId }}>{children}{activeId && step && <div className="tour-layer" aria-live="polite"><div className="tour-scrim"/><div className="tour-spotlight" style={style}/><div className="tour-dialog" style={dialogStyle} ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="tour-title"><button className="icon-close tour-close" type="button" aria-label="关闭教程" onClick={() => close()}><X size={18}/></button><p className="eyebrow"><Compass size={15}/> {activeId === "onboarding" ? "基础教程" : "本页教程"} · {index + 1}/{active.length}</p><h2 id="tour-title">{step.title}</h2><p>{step.detail}</p>{!rect && <small>正在定位此页内容；你仍可以继续教程。</small>}{actionNotice && <small role="status">{actionNotice}</small>}<div className="tour-actions"><Button type="button" variant="ghost" onClick={() => close()}>跳过</Button><Button type="button" variant="ghost" disabled={index === 0} onClick={() => setIndex(index - 1)}>上一步</Button><Button type="button" onClick={next}>{nextLabel}</Button></div></div></div>}</TourContext.Provider>;
 }

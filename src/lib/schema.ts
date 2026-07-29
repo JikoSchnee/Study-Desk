@@ -45,6 +45,11 @@ export const reviewLogs = sqliteTable("review_logs", {
   createdAt: text("created_at").notNull(),
 });
 
+export const initialStudyLogs = sqliteTable("initial_study_logs", {
+  cardId: text("card_id").primaryKey(),
+  completedAt: text("completed_at").notNull(),
+});
+
 export const dailyPlans = sqliteTable("daily_plans", {
   date: text("date").primaryKey(),
   budgetMinutes: integer("budget_minutes").notNull(),

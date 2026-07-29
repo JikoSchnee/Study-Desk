@@ -163,9 +163,9 @@ export default function CardsPage() {
         else setSaveFeedback({ tone: "error", message });
         return message;
       }
-      if (tutorialSave) { setNotice("演示卡已保存，接下来去完成首次练习。 "); completeCheckpoint("tutorial-card-saved"); await load(); return; }
+      if (tutorialSave) { setNotice("演示卡已保存，接下来去完成首次学习。 "); completeCheckpoint("tutorial-card-saved"); await load(); return; }
       completeCheckpoint("card-created"); setDraft(freshDraft()); void load();
-      setSaveFeedback({ tone: "success", message: "卡片已加入待首次练习；完成第一次真实作答后，才会进入复习节奏。" });
+      setSaveFeedback({ tone: "success", message: "卡片已加入首次学习队列；先看懂答案要点，明天再开始第一次主动回忆。" });
     } catch {
       const message = "保存失败，网络连接可能已中断。请重试。";
       if (tutorialSave) setNotice(message);
