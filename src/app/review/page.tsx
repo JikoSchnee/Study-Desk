@@ -13,6 +13,7 @@ import { ComparisonModeControl } from "@/components/comparison-mode-control";
 import { SemanticComparisonProgress } from "@/components/semantic-comparison-progress";
 import { useSemanticComparisonProgress } from "@/components/use-semantic-comparison-progress";
 import { difficultyTier } from "@/lib/card-filters";
+import { answerPointLabels } from "@/lib/import";
 import type { AnswerComparisonMode, Card, CardLearningSummary, Evaluation, RatingName } from "@/lib/types";
 
 type QueueKind = "initial" | "review" | "weak";
@@ -308,6 +309,7 @@ export default function ReviewPage() {
   const sessionCopy = !isRandom ? queueCopy[queue] : null;
 
   const allStudyPointsRevealed = revealedStudyPoints.length === activeCard.answerPoints.length;
+  const studyPointLabels = answerPointLabels(activeCard.answerPoints);
   const revealStudyPoint = (index: number) => setRevealedStudyPoints((current) => current.includes(index) ? current : [...current, index]);
 
   return <PageLayout>
@@ -320,7 +322,8 @@ export default function ReviewPage() {
         <ol className="initial-study-points">
           {activeCard.answerPoints.map((point, index) => {
             const revealed = revealedStudyPoints.includes(index);
-            return <li className={revealed ? "revealed" : ""} key={point.id}><div className="initial-study-point-number">{revealed ? <CheckCircle2 size={17}/> : index + 1}</div><div><p className="eyebrow">要点 {index + 1}</p>{revealed ? <p className="initial-study-answer">{point.content}</p> : <><p className="initial-study-hint"><Lightbulb size={16}/>{point.hint.trim() || "先用自己的话想一想这个关键点。"}</p><Button type="button" variant="secondary" onClick={() => revealStudyPoint(index)}><Eye size={16}/> 查看完整要点</Button></>}</div></li>;
+            const pointLabel = point.role === "key" || !point.role ? studyPointLabels.get(point.id) ?? String(index + 1) : point.role === "opening" ? "开场" : "收束";
+            return <li className={`${revealed ? "revealed" : ""}${point.parentId ? " initial-study-subpoint" : ""}`} key={point.id}><div className="initial-study-point-number">{revealed ? <CheckCircle2 size={17}/> : pointLabel}</div><div><p className="eyebrow">要点 {pointLabel}</p>{revealed ? <p className="initial-study-answer">{point.content}</p> : <><p className="initial-study-hint"><Lightbulb size={16}/>{point.hint.trim() || "先用自己的话想一想这个关键点。"}</p><Button type="button" variant="secondary" onClick={() => revealStudyPoint(index)}><Eye size={16}/> 查看完整要点</Button></>}</div></li>;
           })}
         </ol>
         {allStudyPointsRevealed && <div className="initial-study-recall"><div><p className="eyebrow">合上答案，试着说一遍</p><h3>用自己的话复述核心逻辑。</h3><p>不用输入或评分；只要能把关键点串起来，就可以继续。</p></div><label><input type="checkbox" checked={spokenBack} onChange={(event) => setSpokenBack(event.target.checked)}/> 我已完成口头复述</label></div>}

@@ -5,6 +5,7 @@ import { CalendarClock, ChartNoAxesCombined, CircleCheckBig, ClipboardCheck, Clo
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { AnswerComparisonView } from "@/components/answer-comparison";
 import { difficultyTier } from "@/lib/card-filters";
+import { answerPointLabels } from "@/lib/import";
 import type { AnswerPoint, AnswerPointRole, Card, CardLearningDetails, CardRelationType, RatingName } from "@/lib/types";
 
 const ratingLabel: Record<RatingName, string> = { again: "忘记", hard: "困难", good: "良好", easy: "轻松" };
@@ -15,8 +16,9 @@ function answerPointRole(point: AnswerPoint): AnswerPointRole {
 }
 
 function AnswerPointSummary({ points }: { points: AnswerPoint[] }) {
+  const labels = answerPointLabels(points);
   const sections = (["opening", "key", "closing"] as AnswerPointRole[]).map((role) => ({ role, points: points.filter((point) => answerPointRole(point) === role && point.content.trim()) })).filter((section) => section.points.length);
-  return <div className="detail-answer-summary"><p className="eyebrow">答案要点</p>{sections.map((section) => <section className={`detail-answer-section ${section.role}`} key={section.role}><h4>{answerSectionLabel[section.role]}</h4>{section.role === "key" ? <ol>{section.points.map((point) => <li key={point.id}>{point.content}</li>)}</ol> : <p>{section.points[0].content}</p>}</section>)}</div>;
+  return <div className="detail-answer-summary"><p className="eyebrow">答案要点</p>{sections.map((section) => <section className={`detail-answer-section ${section.role}`} key={section.role}><h4>{answerSectionLabel[section.role]}</h4>{section.role === "key" ? <ol>{section.points.filter((point) => !point.parentId).map((point) => <li key={point.id}><span className="answer-point-label">{labels.get(point.id)}</span>{point.content}{points.some((child) => child.parentId === point.id) && <ol>{points.filter((child) => child.parentId === point.id).map((child) => <li key={child.id}><span className="answer-point-label">{labels.get(child.id)}</span>{child.content}</li>)}</ol>}</li>)}</ol> : <p>{section.points[0].content}</p>}</section>)}</div>;
 }
 
 function exactTime(value: string | null) {

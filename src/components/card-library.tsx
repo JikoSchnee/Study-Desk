@@ -12,7 +12,7 @@ import { SearchableSelect } from "@/components/searchable-select";
 import { Button, Chip, EmptyState, Panel } from "@/components/ui";
 import { useTour } from "@/components/tour";
 import { difficultyTier, filterAndSortCards, type CardSort, type SortDirection } from "@/lib/card-filters";
-import { splitTags } from "@/lib/import";
+import { answerPointsToNumberedText, splitTags } from "@/lib/import";
 import type { AnswerPoint, Card, CardLearningDetails, CardLearningSummary, CardRelation, CardRelationType, QuestionVariant } from "@/lib/types";
 
 type CardDraft = { question: string; questionVariants: QuestionVariant[]; relations: CardRelation[]; answerPoints: AnswerPoint[]; note: string; track: string; tags: string; source: string };
@@ -291,7 +291,7 @@ export function CardLibrary() {
   const exportSelected = (format: "json" | "csv") => {
     const selected = cards.filter((card) => selectedIds.has(card.id));
     if (!selected.length) return;
-    const content = format === "json" ? JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), cards: selected }, null, 2) : ["问题,其他问法,开场总述,答案,回忆提示,收束总结,知识库类型,标签,状态", ...selected.map((card) => { const opening = card.answerPoints.find((point) => point.role === "opening")?.content ?? ""; const closing = card.answerPoints.find((point) => point.role === "closing")?.content ?? ""; const core = card.answerPoints.filter((point) => point.role !== "opening" && point.role !== "closing"); return [card.question, card.questionVariants.map((point) => point.content).join("\n"), opening, core.map((point) => point.content).join("\n"), core.map((point) => point.hint).join("\n"), closing, card.track, card.tags.join("|"), card.status].map((value) => `\"${value.replaceAll("\"", "\"\"")}\"`).join(","); })].join("\n");
+    const content = format === "json" ? JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), cards: selected }, null, 2) : ["问题,其他问法,开场总述,答案,回忆提示,收束总结,知识库类型,标签,状态", ...selected.map((card) => { const opening = card.answerPoints.find((point) => point.role === "opening")?.content ?? ""; const closing = card.answerPoints.find((point) => point.role === "closing")?.content ?? ""; return [card.question, card.questionVariants.map((point) => point.content).join("\n"), opening, answerPointsToNumberedText(card.answerPoints), answerPointsToNumberedText(card.answerPoints, "hint"), closing, card.track, card.tags.join("|"), card.status].map((value) => `\"${value.replaceAll("\"", "\"\"")}\"`).join(","); })].join("\n");
     const blob = new Blob([content], { type: format === "json" ? "application/json" : "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = `mock-interview-cards.${format}`; link.click(); URL.revokeObjectURL(url);
   };

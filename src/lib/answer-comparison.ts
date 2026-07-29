@@ -104,11 +104,15 @@ function statusFor(score: number): AnswerPointComparison["status"] { return scor
 function roleOf(value: { role?: AnswerPointRole }): AnswerPointRole { return value.role === "opening" || value.role === "closing" ? value.role : "key"; }
 
 function cardPoints(card: Card) {
-  const points = card.answerPoints.filter((point) => point.content.trim()).map((point, index) => ({ id: point.id || `point-${index}`, content: point.content.trim(), role: roleOf(point) }));
+  const points = card.answerPoints.filter((point) => point.content.trim()).map((point, index) => ({ id: point.id || `point-${index}`, content: point.content.trim(), role: roleOf(point), parentId: point.parentId }));
   const structureCount = points.filter((point) => point.role !== "key").length;
   const keyCount = points.filter((point) => point.role === "key").length;
   const keyWeight = keyCount ? (1 - structureCount * .1) / keyCount : 0;
   return points.map((point) => ({ ...point, weight: point.role === "key" ? keyWeight : .1 }));
+}
+
+function mayShareEvidence(left: { id: string; parentId?: string }, right: { id: string; parentId?: string }) {
+  return left.parentId === right.id || right.parentId === left.id;
 }
 
 function asComparison(requestedMode: AnswerComparisonMode, source: AnswerComparison["source"], points: AnswerPointComparison[], warning?: string): AnswerComparison { return { requestedMode, source, points, ...(warning ? { warning } : {}) }; }
@@ -123,13 +127,13 @@ function mapNonOverlappingPoints(card: Card, answer: string, scoreFor: (referenc
   const candidates = points.flatMap(({ content }, pointIndex) => segments.map((segment) => ({ pointIndex, segment, score: scoreFor(content, segment.text) }))).filter((candidate) => candidate.score >= evidenceThreshold).sort((left, right) => right.score - left.score || left.segment.text.length - right.segment.text.length);
   const selected = new Map<number, { segment: Segment; score: number }>();
   for (const candidate of candidates) {
-    if (selected.has(candidate.pointIndex) || [...selected.values()].some((item) => overlap(item.segment, candidate.segment))) continue;
+    if (selected.has(candidate.pointIndex) || [...selected.entries()].some(([pointIndex, item]) => overlap(item.segment, candidate.segment) && !mayShareEvidence(points[candidate.pointIndex], points[pointIndex]))) continue;
     selected.set(candidate.pointIndex, candidate);
   }
-  return points.map(({ id, content, role, weight }, pointIndex) => {
+  return points.map(({ id, content, role, parentId, weight }, pointIndex) => {
     const evidence = selected.get(pointIndex);
     const bestScore = evidence?.score ?? Math.max(0, ...segments.map((segment) => scoreFor(content, segment.text)));
-    return { answerPointId: id, reference: content, role, weight, score: bestScore, status: statusFor(bestScore), evidence: evidence ? [evidenceFor(evidence.segment, evidence.score)] : [] } satisfies AnswerPointComparison;
+    return { answerPointId: id, reference: content, role, parentId, weight, score: bestScore, status: statusFor(bestScore), evidence: evidence ? [evidenceFor(evidence.segment, evidence.score)] : [] } satisfies AnswerPointComparison;
   });
 }
 
@@ -340,13 +344,13 @@ export async function compareWithEmbeddings(card: Card, answer: string, requeste
     const candidates = points.flatMap((_, pointIndex) => segments.map((segment, segmentIndex) => ({ pointIndex, segment, score: cosineSimilarity(pointVectors[pointIndex], segmentVectors[segmentIndex]) }))).filter((candidate) => candidate.score >= 0.6).sort((left, right) => right.score - left.score || left.segment.text.length - right.segment.text.length);
     const selected = new Map<number, { segment: Segment; score: number }>();
     for (const candidate of candidates) {
-      if (selected.has(candidate.pointIndex) || [...selected.values()].some((item) => overlap(item.segment, candidate.segment))) continue;
+      if (selected.has(candidate.pointIndex) || [...selected.entries()].some(([pointIndex, item]) => overlap(item.segment, candidate.segment) && !mayShareEvidence(points[candidate.pointIndex], points[pointIndex]))) continue;
       selected.set(candidate.pointIndex, candidate);
     }
-    const mapped = points.map(({ id, content, role, weight }, pointIndex) => {
+    const mapped = points.map(({ id, content, role, parentId, weight }, pointIndex) => {
       const evidence = selected.get(pointIndex);
       const bestScore = evidence?.score ?? Math.max(0, ...segments.map((_, segmentIndex) => cosineSimilarity(pointVectors[pointIndex], segmentVectors[segmentIndex])));
-      return { answerPointId: id, reference: content, role, weight, score: bestScore, status: statusFor(bestScore), evidence: evidence ? [evidenceFor(evidence.segment, evidence.score)] : [] } satisfies AnswerPointComparison;
+      return { answerPointId: id, reference: content, role, parentId, weight, score: bestScore, status: statusFor(bestScore), evidence: evidence ? [evidenceFor(evidence.segment, evidence.score)] : [] } satisfies AnswerPointComparison;
     });
     setComparisonProgress(progressId, { percent: 96, stage: "matching", message: "正在整理对应结果…" });
     return asComparison(requestedMode, "embedding", mapped);
@@ -360,24 +364,28 @@ export function comparisonFromLLM(card: Card, answer: string, raw: unknown): Ans
   const data = raw as { matches?: unknown };
   if (!Array.isArray(data.matches)) throw new Error("模型没有返回要点映射");
   const points = cardPoints(card);
-  const used = new Set<string>();
+  const used = new Map<string, string[]>();
+  const pointById = new Map(points.map((point) => [point.id, point]));
   const matches = new Map((data.matches as Array<{ id?: unknown; status?: unknown; evidence?: unknown }>).flatMap((item) => {
     if (typeof item.id !== "string" || !["covered", "partial", "missing"].includes(String(item.status))) return [];
+    const target = pointById.get(item.id);
+    if (!target) return [];
     const evidence = Array.isArray(item.evidence) ? item.evidence.flatMap((value) => {
       if (typeof value !== "string" || !value.trim()) return [];
       const start = answer.indexOf(value, 0);
       const key = `${start}:${value.length}`;
-      if (start < 0 || used.has(key)) return [];
-      used.add(key); return [{ text: value, start, end: start + value.length }];
+      const existing = (used.get(key) ?? []).map((id) => pointById.get(id)).filter((point): point is NonNullable<typeof point> => Boolean(point));
+      if (start < 0 || existing.some((point) => !mayShareEvidence(target, point))) return [];
+      used.set(key, [...(used.get(key) ?? []), target.id]); return [{ text: value, start, end: start + value.length }];
     }) : [];
     if (String(item.status) !== "missing" && !evidence.length) return [];
     return [[item.id, { status: item.status as AnswerPointComparison["status"], evidence }]];
   }));
   if (matches.size === 0 && points.length > 0) throw new Error("模型没有返回可验证的对应片段");
-  const result = points.map(({ id, content, role, weight }) => {
+  const result = points.map(({ id, content, role, parentId, weight }) => {
     const item = matches.get(id);
     const score = item?.status === "covered" ? 1 : item?.status === "partial" ? 0.68 : 0;
-    return { answerPointId: id, reference: content, role, weight, status: item?.status ?? "missing", score, evidence: item?.evidence ?? [] };
+    return { answerPointId: id, reference: content, role, parentId, weight, status: item?.status ?? "missing", score, evidence: item?.evidence ?? [] };
   });
   return asComparison("llm", "llm", result);
 }

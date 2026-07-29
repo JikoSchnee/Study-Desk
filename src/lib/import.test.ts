@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { answerFromPoints, answerPointsFromStored, answerPointsFromText, answerPointsToJson, hasCoreAnswerPoint, normalizeAnswerPoints, previewImport, splitTags } from "./import";
+import { answerFromPoints, answerPointHierarchyError, answerPointLabels, answerPointsFromStored, answerPointsFromText, answerPointsToJson, answerPointsToNumberedText, hasCoreAnswerPoint, normalizeAnswerPoints, previewImport, splitTags } from "./import";
 
 describe("previewImport", () => {
   it("rejects repeated questions without discarding valid cards", () => {
@@ -38,5 +38,21 @@ describe("card import normalization", () => {
     expect(answerPointsFromStored('[{"id":"legacy","content":"旧版要点"}]', "")[0].role).toBe("key");
     expect(hasCoreAnswerPoint(points)).toBe(true);
     expect(hasCoreAnswerPoint(points.filter((point) => point.role !== "key"))).toBe(false);
+  });
+
+  it("keeps numbered subpoints content-only while matching parent hints", () => {
+    const points = answerPointsFromText("1. 先说明整体机制\n1.1 先完成召回\n1.2 再进行重排序\n2. 最后说明收益", "1. 总框架\n1.1 覆盖率\n1.2 相关性\n2. 结果");
+    expect(points.map((point) => point.parentId)).toEqual([undefined, points[0].id, points[0].id, undefined]);
+    expect(points.map((point) => point.hint)).toEqual(["总框架", "", "", "结果"]);
+    expect([...answerPointLabels(points).values()]).toEqual(["1", "1.1", "1.2", "2"]);
+    expect(answerPointsToNumberedText(points)).toContain("1.1 先完成召回");
+    expect(answerPointsToNumberedText(points, "hint")).toBe("1. 总框架\n2. 结果");
+  });
+
+  it("rejects invalid or nested parent links while preserving legacy flat points", () => {
+    const parent = { id: "parent", content: "父项", hint: "", note: "" };
+    expect(answerPointHierarchyError([parent, { id: "child", content: "子项", hint: "", note: "", parentId: "parent" }])).toBeUndefined();
+    expect(answerPointHierarchyError([{ ...parent, parentId: "missing" }])).toBeTruthy();
+    expect(answerPointHierarchyError([parent, { id: "child", content: "子项", hint: "", note: "", parentId: "parent" }, { id: "nested", content: "嵌套", hint: "", note: "", parentId: "child" }])).toBeTruthy();
   });
 });

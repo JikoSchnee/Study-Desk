@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { modelProviders, type ModelProviderId, type ModelProtocol } from "@/lib/model-providers";
 import { normalizeQuestion } from "@/lib/question-variants";
 import { compareWithEmbeddings, comparisonFromLLM, evaluationFromComparison } from "@/lib/answer-comparison";
+import { answerPointLabels } from "@/lib/import";
 import type { AnswerComparisonMode, AnswerPoint, Card, CardRelationType, Evaluation, FollowUpCardDraft, QuestionVariant } from "@/lib/types";
 
 export interface LLMProvider { evaluateAnswer(card: Card, answer: string): Promise<Evaluation>; }
@@ -67,8 +68,8 @@ const remoteLLMProvider: LLMProvider = {
     const content = await requestModel(config, {
       temperature: 0.2,
       jsonMode: true,
-      system: "你是严谨的中文技术面试教练。只返回 JSON：{feedback:string,matches:[{id:string,status:covered|partial|missing,evidence:string[]}]}. evidence 必须逐字摘自本次回答；每条非 missing 要点至少给一个 evidence。不得编造证据。",
-      user: `问题：${card.question}\n参考答案结构：\n${card.answerPoints.map((point) => `- id=${point.id}（${point.role === "opening" ? "开场总述" : point.role === "closing" ? "收束总结" : "核心要点"}）：${point.content}`).join("\n")}\n本次回答：${answer}`,
+      system: "你是严谨的中文技术面试教练。只返回 JSON：{feedback:string,matches:[{id:string,status:covered|partial|missing,evidence:string[]}]}. evidence 必须逐字摘自本次回答；每条非 missing 要点至少给一个 evidence。不得编造证据。父项与其直接子项可以引用同一段 evidence，其他要点不可复用同一证据。",
+      user: (() => { const labels = answerPointLabels(card.answerPoints); return `问题：${card.question}\n参考答案结构：\n${card.answerPoints.map((point) => `- id=${point.id}（${point.role === "opening" ? "开场总述" : point.role === "closing" ? "收束总结" : `核心要点 ${labels.get(point.id) ?? ""}`}${point.parentId ? "，子项" : ""}）：${point.content}`).join("\n")}\n本次回答：${answer}`; })(),
     });
     const data = JSON.parse(content) as { feedback?: unknown };
     const comparison = comparisonFromLLM(card, answer, data);

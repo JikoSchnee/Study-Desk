@@ -2,7 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { sqlite } from "@/lib/db";
 import { parseTags, toTags } from "@/lib/utils";
-import { answerFromPoints, answerPointsFromStored, answerPointsToJson, hasCoreAnswerPoint, previewImport } from "@/lib/import";
+import { answerFromPoints, answerPointHierarchyError, answerPointsFromStored, answerPointsToJson, hasCoreAnswerPoint, previewImport } from "@/lib/import";
 import { allQuestionTexts, findQuestionCollision, normalizeQuestionVariants, questionVariantsFromStored, questionVariantsToJson } from "@/lib/question-variants";
 import { findSimilarImportQuestions } from "@/lib/import-similarity";
 import { normalizeCardRelations, reciprocalRelationType } from "@/lib/card-relations";
@@ -71,6 +71,8 @@ export function createCard(input: CardInput) {
   const relations = normalizeCardRelations(input.relations ?? []);
   assertRelatedCardsExist(relations);
   const answerPoints = input.answerPoints?.filter((point) => point.content.trim()).length ? input.answerPoints : answerPointsFromStored(null, input.answer);
+  const hierarchyError = answerPointHierarchyError(answerPoints);
+  if (hierarchyError) throw new Error(hierarchyError);
   if (!hasCoreAnswerPoint(answerPoints)) throw new Error("请至少填写一条核心答案要点。");
   const answer = answerFromPoints(answerPoints);
   const question = input.question.trim().replace(/\s+/g, " ");
@@ -105,6 +107,8 @@ export function updateCard(id: string, input: Pick<Card, "question" | "questionV
   const question = input.question.trim().replace(/\s+/g, " ");
   const questionVariants = normalizeQuestionVariants(question, input.questionVariants);
   const answerPoints = input.answerPoints.filter((point) => point.content.trim());
+  const hierarchyError = answerPointHierarchyError(answerPoints);
+  if (hierarchyError) throw new Error(hierarchyError);
   if (!hasCoreAnswerPoint(answerPoints)) throw new Error("请至少填写一条核心答案要点。");
   const collision = findQuestionCollision(question, questionVariants, existingQuestionTexts(id));
   if (collision && card.source !== "tutorial") throw new Error(`问法“${collision}”已存在于其他卡片。`);

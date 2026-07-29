@@ -5,6 +5,7 @@ import { ArrowDown, ArrowUp, Check, Link2, Plus, Search, Sparkles, Tags, Trash2,
 import { Button } from "@/components/ui";
 import { rankRelatedCardOptions } from "@/lib/related-card-options";
 import { promoteQuestionVariant } from "@/lib/question-variants";
+import { answerPointLabels } from "@/lib/import";
 import type { AnswerPoint, AnswerPointRole, Card, CardRelation, CardRelationType, QuestionVariant } from "@/lib/types";
 
 function pointId() {
@@ -16,9 +17,35 @@ const point = (role: AnswerPointRole = "key"): AnswerPoint => ({ id: pointId(), 
 const variant = (): QuestionVariant => ({ id: pointId(), content: "", source: "manual" });
 
 export function AnswerPointsEditor({ points, onChange, label = "答案要点" }: { points: AnswerPoint[]; onChange: (points: AnswerPoint[]) => void; label?: string }) {
-  const update = (id: string, change: Partial<AnswerPoint>) => onChange(points.map((item) => item.id === id ? { ...item, ...change, role: "key" } : item));
-  const move = (index: number, direction: -1 | 1) => { const next = [...points]; const target = index + direction; if (target < 0 || target >= points.length) return; [next[index], next[target]] = [next[target], next[index]]; onChange(next); };
-  return <fieldset className="answer-points"><legend>{label}</legend><p>每行一个能独立说出口的要点；用提示词保留回忆线索，而不是写出完整答案。</p>{points.map((item, index) => <div className="answer-point" key={item.id}><span>{index + 1}</span><div className="answer-point-fields"><textarea rows={2} value={item.content} onChange={(event) => update(item.id, { content: event.target.value })} placeholder={index === 0 ? "例如：初步召回关注覆盖率，重排序关注相关性。" : "补充一个要点…"} /><label className="hint-field">回忆提示（可选）<input value={item.hint} onChange={(event) => update(item.id, { hint: event.target.value })} placeholder="例如：两阶段目标" /></label><label className="point-note-field">要点批注（可选）<textarea rows={2} value={item.note} onChange={(event) => update(item.id, { note: event.target.value })} placeholder="例如：补充一个真实案例，或标记待核实的说法。" /></label></div><div className="point-controls"><button type="button" aria-label="上移要点" disabled={index === 0} onClick={() => move(index, -1)}><ArrowUp size={15}/></button><button type="button" aria-label="下移要点" disabled={index === points.length - 1} onClick={() => move(index, 1)}><ArrowDown size={15}/></button><button type="button" aria-label="删除要点" disabled={points.length === 1} onClick={() => onChange(points.filter((entry) => entry.id !== item.id))}><Trash2 size={15}/></button></div></div>)}<Button type="button" variant="ghost" className="add-point" onClick={() => onChange([...points, point()])}><Plus size={16}/> 添加答案要点</Button></fieldset>;
+  const update = (id: string, change: Partial<AnswerPoint>) => onChange(points.map((item) => item.id === id ? { ...item, ...change, role: "key", ...(item.parentId ? { hint: "", note: "" } : {}) } : item));
+  const roots = points.filter((item) => !item.parentId);
+  const childrenOf = (id: string) => points.filter((item) => item.parentId === id);
+  const labels = answerPointLabels(points);
+  const moveRoot = (id: string, direction: -1 | 1) => {
+    const index = roots.findIndex((item) => item.id === id); const target = index + direction;
+    if (target < 0 || target >= roots.length) return;
+    const orderedRoots = [...roots]; [orderedRoots[index], orderedRoots[target]] = [orderedRoots[target], orderedRoots[index]];
+    onChange(orderedRoots.flatMap((root) => [root, ...childrenOf(root.id)]));
+  };
+  const moveChild = (item: AnswerPoint, direction: -1 | 1) => {
+    const siblings = childrenOf(item.parentId!); const index = siblings.findIndex((entry) => entry.id === item.id); const target = index + direction;
+    if (target < 0 || target >= siblings.length) return;
+    const reordered = [...siblings]; [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+    const root = roots.find((entry) => entry.id === item.parentId)!;
+    onChange(roots.flatMap((entry) => entry.id === root.id ? [entry, ...reordered] : [entry, ...childrenOf(entry.id)]));
+  };
+  const remove = (item: AnswerPoint) => onChange(item.parentId ? points.filter((entry) => entry.id !== item.id) : points.filter((entry) => entry.id !== item.id && entry.parentId !== item.id));
+  const addChild = (parent: AnswerPoint) => {
+    const child = point(); child.parentId = parent.id;
+    const index = points.reduce((last, item, position) => item.id === parent.id || item.parentId === parent.id ? position : last, -1);
+    onChange([...points.slice(0, index + 1), child, ...points.slice(index + 1)]);
+  };
+  const renderPoint = (item: AnswerPoint, rootIndex: number, childIndex?: number) => {
+    const isChild = Boolean(item.parentId); const siblings = isChild ? childrenOf(item.parentId!) : roots;
+    const index = siblings.findIndex((entry) => entry.id === item.id);
+    return <div className={`answer-point${isChild ? " answer-subpoint" : ""}`} key={item.id}><span>{labels.get(item.id) ?? (childIndex === undefined ? rootIndex + 1 : `${rootIndex + 1}.${childIndex + 1}`)}</span><div className="answer-point-fields"><textarea rows={2} value={item.content} onChange={(event) => update(item.id, { content: event.target.value })} placeholder={!isChild && rootIndex === 0 ? "例如：初步召回关注覆盖率，重排序关注相关性。" : isChild ? "补充这一项的具体内容…" : "补充一个要点…"} />{!isChild && <><label className="hint-field">回忆提示（可选）<input value={item.hint} onChange={(event) => update(item.id, { hint: event.target.value })} placeholder="例如：两阶段目标" /></label><label className="point-note-field">要点批注（可选）<textarea rows={2} value={item.note} onChange={(event) => update(item.id, { note: event.target.value })} placeholder="例如：补充一个真实案例，或标记待核实的说法。" /></label></>}</div><div className="point-controls"><button type="button" aria-label="上移要点" disabled={index === 0} onClick={() => isChild ? moveChild(item, -1) : moveRoot(item.id, -1)}><ArrowUp size={15}/></button><button type="button" aria-label="下移要点" disabled={index === siblings.length - 1} onClick={() => isChild ? moveChild(item, 1) : moveRoot(item.id, 1)}><ArrowDown size={15}/></button>{!isChild && <button type="button" aria-label="添加子分项" onClick={() => addChild(item)}><Plus size={15}/></button>}<button type="button" aria-label="删除要点" disabled={points.length === 1} onClick={() => remove(item)}><Trash2 size={15}/></button></div></div>;
+  };
+  return <fieldset className="answer-points"><legend>{label}</legend><p>每条都可独立学习和评分；可为核心要点添加一层子分项（如 1.1）。</p>{roots.flatMap((root, rootIndex) => [renderPoint(root, rootIndex), ...childrenOf(root.id).map((child, childIndex) => renderPoint(child, rootIndex, childIndex))])}<Button type="button" variant="ghost" className="add-point" onClick={() => onChange([...points, point()])}><Plus size={16}/> 添加答案要点</Button></fieldset>;
 }
 
 export function AnswerStructureEditor({ points, onChange, label = "答案结构" }: { points: AnswerPoint[]; onChange: (points: AnswerPoint[]) => void; label?: string }) {

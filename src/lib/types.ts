@@ -13,6 +13,8 @@ export interface AnswerPoint {
   hint: string;
   note: string;
   role?: AnswerPointRole;
+  /** A core point may belong to one top-level core point. */
+  parentId?: string;
 }
 
 export interface QuestionVariant {
@@ -108,6 +110,7 @@ export interface AnswerPointComparison {
   answerPointId: string;
   reference: string;
   role?: AnswerPointRole;
+  parentId?: string;
   weight?: number;
   status: AnswerPointCoverage;
   score: number;

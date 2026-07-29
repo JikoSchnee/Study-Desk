@@ -66,4 +66,30 @@ describe("answer comparison", () => {
     expect(evaluationFromComparison(comparison).score).toBe(80);
     expect(evaluationFromComparison(comparison).gaps).toEqual(["开场总述：先给出整体结论", "收束总结：最后回扣适用边界"]);
   });
+
+  it("allows a parent and child answer point to share one evidence segment", () => {
+    const hierarchyCard: Card = { ...card, answerPoints: [
+      { id: "parent", content: "重排序会提升候选资料相关性", hint: "", note: "" },
+      { id: "child", content: "重排序会把最相关资料排在前面", hint: "", note: "", parentId: "parent" },
+      { id: "other", content: "还要控制上下文成本", hint: "", note: "" },
+    ] };
+    const comparison = compareLexically(hierarchyCard, "重排序会把最相关资料排在前面，从而提升候选资料相关性。");
+    expect(comparison.points[0].status).toBe("covered");
+    expect(comparison.points[1].status).toBe("covered");
+    expect(comparison.points[0].evidence[0].start).toBe(comparison.points[1].evidence[0].start);
+    expect(comparison.points[1].parentId).toBe("parent");
+    expect(comparison.points[2].status).toBe("missing");
+  });
+
+  it("accepts duplicate LLM evidence only for a direct parent-child pair", () => {
+    const hierarchyCard: Card = { ...card, answerPoints: [
+      { id: "parent", content: "说明重排序", hint: "", note: "" },
+      { id: "child", content: "说明相关性", hint: "", note: "", parentId: "parent" },
+    ] };
+    const comparison = comparisonFromLLM(hierarchyCard, "重排序改善相关性。", { matches: [
+      { id: "parent", status: "covered", evidence: ["重排序改善相关性"] },
+      { id: "child", status: "covered", evidence: ["重排序改善相关性"] },
+    ] });
+    expect(comparison.points.map((point) => point.status)).toEqual(["covered", "covered"]);
+  });
 });
