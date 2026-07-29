@@ -8,7 +8,7 @@ export const difficultyTiers = [
   { label: "UR", min: 8.2, max: 10.000001 },
 ] as const;
 
-export type CardSort = "updated" | "review" | "practice" | "difficulty";
+export type CardSort = "updated" | "created" | "review" | "practice" | "difficulty";
 export type SortDirection = "asc" | "desc";
 
 export type CardFilterState = {
@@ -64,6 +64,7 @@ export function filterAndSortCards(cards: Card[], learning: Record<string, CardL
   return filtered.slice().sort((left, right) => {
     const leftLearning = learning[left.id];
     const rightLearning = learning[right.id];
+    if (filters.sort === "created") return compareOptional(left.createdAt, right.createdAt, filters.direction);
     if (filters.sort === "review") return compareOptional(leftLearning?.nextReviewAt, rightLearning?.nextReviewAt, filters.direction);
     if (filters.sort === "practice") return compareOptional(leftLearning?.lastReviewAt, rightLearning?.lastReviewAt, filters.direction);
     return compareDifficulty(leftLearning?.fsrsDifficulty, rightLearning?.fsrsDifficulty, filters.direction);

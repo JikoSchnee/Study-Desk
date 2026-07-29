@@ -88,7 +88,7 @@ export function CardDetailsDialog({ card, relatedCards, learning, onClose }: { c
         <button className="icon-close" type="button" onClick={onClose} aria-label="关闭卡片详情"><X size={19}/></button>
       </div>
       <div className="card-details-body">
-        <section className="detail-question"><p className="eyebrow">主问题</p><h3>{card.question}</h3><div className="detail-card-metadata" aria-label="卡片基础信息"><div><span>知识库类型</span><strong>{card.track}</strong></div><div><span>难度</span><strong>{difficulty}</strong></div></div></section>
+        <section className="detail-question"><p className="eyebrow">主问题</p><h3>{card.question}</h3><div className="detail-card-metadata" aria-label="卡片基础信息"><div><span>知识库类型</span><strong>{card.track}</strong></div><div><span>难度</span><strong>{difficulty}</strong></div><div><span>创建时间</span><strong>{exactTime(card.createdAt)}</strong></div></div></section>
         <section className="learning-overview" aria-label="学习概况">
           <div className="learning-stat next"><CalendarClock size={20}/><span>下次复习</span><strong>{relativeTime(learning.nextReviewAt, true)}</strong><small>{exactTime(learning.nextReviewAt)}</small></div>
           <div className="learning-stat last"><History size={20}/><span>上次练习</span><strong>{relativeTime(learning.lastReviewAt)}</strong><small>{exactTime(learning.lastReviewAt)}</small></div>
