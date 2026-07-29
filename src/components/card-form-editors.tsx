@@ -56,18 +56,28 @@ export function QuestionVariantsEditor({ variants, candidates = [], onChange, on
   return <QuestionWordingsEditor question="" variants={variants} candidates={candidates} onChange={({ variants: nextVariants }) => onChange(nextVariants)} onCandidatesChange={onCandidatesChange} onGenerate={onGenerate} busy={busy} label={label} includePrimary={false}/>;
 }
 
-type RecommendationDraft = { question: string; questionVariants: QuestionVariant[]; answerPoints: AnswerPoint[]; note: string; track: string; tags: string[] };
-type CardRecommendation = { cardId: string; question: string; track: string; score: number };
-export function useCardRecommendations(draft: RecommendationDraft, excludeId: string | undefined, relations: CardRelation[]) {
-  const [result, setResult] = useState<{ relatedCards: CardRecommendation[]; tags: string[] }>({ relatedCards: [], tags: [] });
+export type CardRecommendationDraft = { question: string; questionVariants: QuestionVariant[]; answerPoints: AnswerPoint[]; note: string; track: string; tags: string[] };
+export type CardRecommendation = { cardId: string; question: string; track: string; score: number };
+export type CardRecommendationResult = { relatedCards: CardRecommendation[]; tags: string[] };
+export type PreloadedCardRecommendations = { draftKey: string; excludedIds: string; result: CardRecommendationResult };
+
+const emptyRecommendations: CardRecommendationResult = { relatedCards: [], tags: [] };
+
+export function cardRecommendationDraftKey(draft: CardRecommendationDraft) { return JSON.stringify(draft); }
+export function cardRecommendationExcludedIds(excludeId: string | undefined, relations: CardRelation[]) { return JSON.stringify([excludeId, ...relations.map((relation) => relation.cardId)].filter((id): id is string => Boolean(id)).sort()); }
+
+export function useCardRecommendations(draft: CardRecommendationDraft, excludeId: string | undefined, relations: CardRelation[], preloaded?: PreloadedCardRecommendations) {
+  const [result, setResult] = useState<CardRecommendationResult>(emptyRecommendations);
   const [state, setState] = useState<"idle" | "loading" | "error">("idle");
-  const serializedDraft = JSON.stringify(draft);
-  const excludedIds = JSON.stringify([excludeId, ...relations.map((relation) => relation.cardId)].filter((id): id is string => Boolean(id)).sort());
+  const serializedDraft = cardRecommendationDraftKey(draft);
+  const excludedIds = cardRecommendationExcludedIds(excludeId, relations);
+  const hasPreloadedResult = preloaded?.draftKey === serializedDraft && preloaded.excludedIds === excludedIds;
 
   useEffect(() => {
-    if (draft.question.trim().length < 3) { setResult({ relatedCards: [], tags: [] }); setState("idle"); return; }
+    if (draft.question.trim().length < 3) { setResult(emptyRecommendations); setState("idle"); return; }
+    if (hasPreloadedResult) { setResult(preloaded.result); setState("idle"); return; }
     const controller = new AbortController();
-    const currentDraft = JSON.parse(serializedDraft) as RecommendationDraft;
+    const currentDraft = JSON.parse(serializedDraft) as CardRecommendationDraft;
     const timer = window.setTimeout(async () => {
       setState("loading");
       try {
@@ -78,13 +88,13 @@ export function useCardRecommendations(draft: RecommendationDraft, excludeId: st
         setState("idle");
       } catch {
         if (controller.signal.aborted) return;
-        setResult({ relatedCards: [], tags: [] });
+        setResult(emptyRecommendations);
         setState("error");
       }
     }, 700);
     return () => { controller.abort(); window.clearTimeout(timer); };
-  }, [draft.question, excludedIds, serializedDraft]);
-  return { ...result, state };
+  }, [draft.question, excludedIds, hasPreloadedResult, preloaded, serializedDraft]);
+  return { ...(hasPreloadedResult ? preloaded.result : result), state: hasPreloadedResult ? "idle" : state };
 }
 
 export function RelatedCardsEditor({ cards, value, onChange, excludeId, recommendations = [], recommendationState = "idle" }: { cards: Card[]; value: CardRelation[]; onChange: (relations: CardRelation[]) => void; excludeId?: string; recommendations?: CardRecommendation[]; recommendationState?: "idle" | "loading" | "error" }) {

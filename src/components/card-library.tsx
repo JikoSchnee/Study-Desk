@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Archive, ArrowUpDown, CalendarClock, CheckCircle2, Clock3, Download, FilePlus2, LibraryBig, MessageSquareText, MoreHorizontal, PencilLine, Search, Sparkles, Tag, Trash2, Undo2, X } from "lucide-react";
 import { CardDetailsDialog } from "@/components/card-details-dialog";
-import { AnswerStructureEditor as AnswerPointsEditor, QuestionWordingsEditor, RelatedCardsEditor, TagRecommendations, useCardRecommendations } from "@/components/card-form-editors";
+import { AnswerStructureEditor as AnswerPointsEditor, cardRecommendationDraftKey, cardRecommendationExcludedIds, type CardRecommendationDraft, type CardRecommendationResult, QuestionWordingsEditor, RelatedCardsEditor, TagRecommendations, useCardRecommendations } from "@/components/card-form-editors";
 import { DifficultyPreviewDialog } from "@/components/difficulty-preview-dialog";
 import { LLMConfigurationDialog } from "@/components/llm-configuration-dialog";
 import { PageHeader, PageLayout } from "@/components/page-layout";
@@ -39,6 +39,116 @@ function targetsCardControl(target: EventTarget | null) {
 
 const cardTiltMediaQuery = "(hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference)";
 const cardTiltLimit = 5;
+const recommendationPreloadDistance = 3 * (470 + 16);
+
+function recommendationDraftForCard(card: Card): CardRecommendationDraft {
+  return { question: card.question, questionVariants: card.questionVariants, answerPoints: card.answerPoints, note: card.note, track: card.track, tags: card.tags };
+}
+
+function recommendationCacheKey(card: Card) { return `${card.id}:${card.updatedAt}`; }
+
+function useCardRecommendationPreload() {
+  const [recommendations, setRecommendations] = useState<Record<string, CardRecommendationResult>>({});
+  const cache = useRef<Record<string, CardRecommendationResult>>({});
+  const nodes = useRef(new Map<HTMLElement, { id: string; cacheKey: string }>());
+  const observer = useRef<IntersectionObserver | null>(null);
+  const queue = useRef(new Map<string, string>());
+  const inFlight = useRef(false);
+  const controller = useRef<AbortController | null>(null);
+  const timer = useRef<number | null>(null);
+  const generation = useRef(0);
+  const processQueue = useRef<() => void>(() => undefined);
+
+  const schedule = useCallback(() => {
+    if (inFlight.current || timer.current !== null || !queue.current.size) return;
+    timer.current = window.setTimeout(() => {
+      timer.current = null;
+      processQueue.current();
+    }, 0);
+  }, []);
+
+  processQueue.current = () => {
+    if (inFlight.current) return;
+    const queued = [...queue.current.entries()].filter(([cacheKey]) => !cache.current[cacheKey]);
+    queue.current.clear();
+    if (!queued.length) return;
+    const cardIds = queued.map(([, cardId]) => cardId);
+    const cacheKeysByCardId = new Map(queued.map(([cacheKey, cardId]) => [cardId, cacheKey]));
+
+    const currentGeneration = generation.current;
+    const requestController = new AbortController();
+    controller.current = requestController;
+    inFlight.current = true;
+    void fetch("/api/cards/recommendations/preload", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cardIds }), signal: requestController.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Unable to preload recommendations.");
+        return response.json() as Promise<{ recommendations?: Record<string, CardRecommendationResult> }>;
+      })
+      .then((data) => {
+        if (generation.current !== currentGeneration) return;
+        const next = data.recommendations ?? {};
+        if (!Object.keys(next).length) return;
+        cache.current = { ...cache.current, ...Object.fromEntries(Object.entries(next).flatMap(([cardId, result]) => {
+          const cacheKey = cacheKeysByCardId.get(cardId);
+          return cacheKey ? [[cacheKey, result]] : [];
+        })) };
+        setRecommendations(cache.current);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (generation.current !== currentGeneration) return;
+        inFlight.current = false;
+        controller.current = null;
+        schedule();
+      });
+  };
+
+  const enqueue = useCallback((card: { id: string; cacheKey: string }) => {
+    if (cache.current[card.cacheKey]) return;
+    queue.current.set(card.cacheKey, card.id);
+    schedule();
+  }, [schedule]);
+
+  const registerCard = useCallback((card: Card, node: HTMLElement | null) => {
+    for (const [currentNode, currentCard] of nodes.current) if (currentCard.id === card.id) {
+      observer.current?.unobserve(currentNode);
+      nodes.current.delete(currentNode);
+    }
+    if (!node) return;
+    nodes.current.set(node, { id: card.id, cacheKey: recommendationCacheKey(card) });
+    observer.current?.observe(node);
+  }, []);
+
+  const clear = useCallback(() => {
+    generation.current += 1;
+    controller.current?.abort();
+    controller.current = null;
+    inFlight.current = false;
+    queue.current.clear();
+    cache.current = {};
+    setRecommendations({});
+  }, []);
+
+  useEffect(() => {
+    if (!("IntersectionObserver" in window)) return;
+    const nextObserver = new IntersectionObserver((entries) => {
+      for (const entry of entries) if (entry.isIntersecting) {
+        const card = nodes.current.get(entry.target as HTMLElement);
+        if (card) enqueue(card);
+      }
+    }, { rootMargin: `0px 0px ${recommendationPreloadDistance}px 0px` });
+    observer.current = nextObserver;
+    for (const node of nodes.current.keys()) nextObserver.observe(node);
+    return () => { nextObserver.disconnect(); if (observer.current === nextObserver) observer.current = null; };
+  }, [enqueue]);
+
+  useEffect(() => () => {
+    controller.current?.abort();
+    if (timer.current !== null) window.clearTimeout(timer.current);
+  }, []);
+
+  return { recommendations, registerCard, clear };
+}
 
 function canTiltCard(event: ReactPointerEvent<HTMLElement>) {
   return event.pointerType === "mouse" && window.matchMedia(cardTiltMediaQuery).matches;
@@ -87,7 +197,16 @@ export function CardLibrary() {
   const [difficultyPreviewOpen, setDifficultyPreviewOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showArchived, setShowArchived] = useState(false);
-  const editorRecommendations = useCardRecommendations({ question: editingDraft?.question ?? "", questionVariants: editingDraft?.questionVariants ?? [], answerPoints: editingDraft?.answerPoints ?? [], note: editingDraft?.note ?? "", track: editingDraft?.track ?? "", tags: splitTags(editingDraft?.tags ?? "") }, editingCard?.id, editingDraft?.relations ?? []);
+  const recommendationPreload = useCardRecommendationPreload();
+  const editorRecommendationDraft = useMemo<CardRecommendationDraft>(() => ({ question: editingDraft?.question ?? "", questionVariants: editingDraft?.questionVariants ?? [], answerPoints: editingDraft?.answerPoints ?? [], note: editingDraft?.note ?? "", track: editingDraft?.track ?? "", tags: splitTags(editingDraft?.tags ?? "") }), [editingDraft]);
+  const preloadedEditorResult = editingCard ? recommendationPreload.recommendations[recommendationCacheKey(editingCard)] : undefined;
+  const preloadedEditorRecommendations = useMemo(() => {
+    if (!editingCard) return undefined;
+    if (!preloadedEditorResult) return undefined;
+    const persistedDraft = recommendationDraftForCard(editingCard);
+    return { draftKey: cardRecommendationDraftKey(persistedDraft), excludedIds: cardRecommendationExcludedIds(editingCard.id, editingCard.relations), result: preloadedEditorResult };
+  }, [editingCard, preloadedEditorResult]);
+  const editorRecommendations = useCardRecommendations(editorRecommendationDraft, editingCard?.id, editingDraft?.relations ?? [], preloadedEditorRecommendations);
 
   const load = useCallback(() => fetch("/api/cards").then((response) => response.json()).then((data) => { setCards(data.cards); setLearningByCardId(data.learning ?? {}); }), []);
   useEffect(() => { load(); }, [load]);
@@ -147,7 +266,7 @@ export function CardLibrary() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "无法保存卡片。");
       setNotice(`“${data.card.question}”已更新，复习进度保持不变。`);
-      setEditingCard(null); setEditingDraft(null); setAiCandidates([]); await load();
+      recommendationPreload.clear(); setEditingCard(null); setEditingDraft(null); setAiCandidates([]); await load();
     } catch (error) { setNotice(error instanceof Error ? error.message : "无法保存卡片。"); }
     finally { setEditBusy(false); }
   };
@@ -167,7 +286,7 @@ export function CardLibrary() {
     const response = await fetch("/api/cards/bulk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, ids, value }) });
     const data = await response.json();
     if (!response.ok) { setNotice(data.error ?? "批量操作失败。"); return; }
-    setSelectedIds(new Set()); setNotice(action === "delete" ? "已永久删除所选卡片和关联记录。" : "已更新所选卡片。"); await load();
+    recommendationPreload.clear(); setSelectedIds(new Set()); setNotice(action === "delete" ? "已永久删除所选卡片和关联记录。" : "已更新所选卡片。"); await load();
   };
   const exportSelected = (format: "json" | "csv") => {
     const selected = cards.filter((card) => selectedIds.has(card.id));
@@ -192,6 +311,7 @@ export function CardLibrary() {
         return <Panel
           className={`knowledge-card ${selectionMode ? "selection-mode" : ""} ${selected ? "selected" : ""}`}
           key={card.id}
+          ref={(node) => recommendationPreload.registerCard(card, node)}
           data-tour={isTutorialCard ? "tutorial-library-card" : "library-card"}
           tabIndex={selectionMode ? 0 : undefined}
           aria-label={selectionMode ? `${card.question}，${selected ? "已选择" : "未选择"}。按 Enter 或空格切换选择。` : undefined}

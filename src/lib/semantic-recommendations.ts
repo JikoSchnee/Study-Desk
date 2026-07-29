@@ -16,6 +16,9 @@ export type RecommendationDraft = {
   tags: string[];
 };
 
+export type CardRecommendation = { cardId: string; question: string; track: string; score: number };
+export type CardRecommendationResult = { relatedCards: CardRecommendation[]; tags: string[] };
+
 export function recommendationText(card: RecommendationDraft) {
   return [card.question, ...card.questionVariants.map((item) => item.content), ...card.answerPoints.map((item) => item.content), card.note, card.track, ...card.tags]
     .map((item) => item.trim())
@@ -25,21 +28,16 @@ export function recommendationText(card: RecommendationDraft) {
 
 function cacheKey(card: Card) { return `${card.id}:${card.updatedAt}`; }
 
-async function vectorsFor(cards: Card[], draftText: string) {
+async function vectorsForCards(cards: Card[]) {
   const missing = cards.filter((card) => !vectorCache.has(cacheKey(card)));
-  const vectors = await embedTexts([draftText, ...missing.map(recommendationText)]);
-  const [draftVector, ...freshVectors] = vectors;
-  missing.forEach((card, index) => { const vector = freshVectors[index]; if (vector) vectorCache.set(cacheKey(card), vector); });
-  return { draftVector, cardVectors: cards.map((card) => vectorCache.get(cacheKey(card))) };
+  if (missing.length) {
+    const freshVectors = await embedTexts(missing.map(recommendationText));
+    missing.forEach((card, index) => { const vector = freshVectors[index]; if (vector) vectorCache.set(cacheKey(card), vector); });
+  }
+  return cards.map((card) => vectorCache.get(cacheKey(card)));
 }
 
-export async function recommendCardMetadata(draft: RecommendationDraft, cards: Card[], excludedCardIds: string[] = []) {
-  const draftText = recommendationText(draft);
-  if (draftText.length < 3) return { relatedCards: [], tags: [] };
-  const excluded = new Set(excludedCardIds);
-  const candidates = cards.filter((card) => !excluded.has(card.id));
-  if (!candidates.length) return { relatedCards: [], tags: [] };
-  const { draftVector, cardVectors } = await vectorsFor(candidates, draftText);
+function recommendationsFromVector(draft: RecommendationDraft, draftVector: number[] | undefined, candidates: Card[], cardVectors: Array<number[] | undefined>): CardRecommendationResult {
   if (!draftVector) return { relatedCards: [], tags: [] };
   const ranked = candidates.flatMap((card, index) => {
     const vector = cardVectors[index];
@@ -55,4 +53,34 @@ export async function recommendCardMetadata(draft: RecommendationDraft, cards: C
   }
   const tags = [...tagScores.values()].sort((left, right) => right.score - left.score || left.label.localeCompare(right.label, "zh-CN")).slice(0, MAX_TAGS).map((tag) => tag.label);
   return { relatedCards, tags };
+}
+
+function excludedCards(cards: Card[], excludedCardIds: string[]) {
+  const excluded = new Set(excludedCardIds);
+  return cards.filter((card) => !excluded.has(card.id));
+}
+
+export async function preloadCardRecommendations(cards: Card[], cardIds: string[]): Promise<Record<string, CardRecommendationResult>> {
+  const targets = cardIds.flatMap((id) => {
+    const card = cards.find((item) => item.id === id);
+    return card ? [card] : [];
+  });
+  if (!targets.length) return {};
+
+  const cardVectors = await vectorsForCards(cards);
+  const vectorByCardId = new Map(cards.map((card, index) => [card.id, cardVectors[index]]));
+  return Object.fromEntries(targets.map((card) => {
+    const candidates = excludedCards(cards, [card.id, ...card.relations.map((relation) => relation.cardId)]);
+    return [card.id, recommendationsFromVector(card, vectorByCardId.get(card.id), candidates, candidates.map((candidate) => vectorByCardId.get(candidate.id)))];
+  }));
+}
+
+export async function recommendCardMetadata(draft: RecommendationDraft, cards: Card[], excludedCardIds: string[] = []): Promise<CardRecommendationResult> {
+  const draftText = recommendationText(draft);
+  if (draftText.length < 3) return { relatedCards: [], tags: [] };
+  const candidates = excludedCards(cards, excludedCardIds);
+  if (!candidates.length) return { relatedCards: [], tags: [] };
+  const [draftVector] = await embedTexts([draftText]);
+  const cardVectors = await vectorsForCards(candidates);
+  return recommendationsFromVector(draft, draftVector, candidates, cardVectors);
 }

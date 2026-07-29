@@ -5,10 +5,11 @@ vi.mock("@/lib/answer-comparison", () => ({
   cosineSimilarity: (left: number[], right: number[]) => left[0] * right[0] + left[1] * right[1],
 }));
 
-import { recommendCardMetadata, recommendationText } from "./semantic-recommendations";
-import type { Card } from "./types";
+import { embedTexts } from "@/lib/answer-comparison";
+import { preloadCardRecommendations, recommendCardMetadata, recommendationText } from "./semantic-recommendations";
+import type { Card, CardRelation } from "./types";
 
-const card = (id: string, question: string, tags: string[]): Card => ({ id, question, questionVariants: [], relations: [], answer: question, answerPoints: [{ id: `${id}-point`, content: question, hint: "", note: "" }], note: "", track: "Agent", tags, difficulty: 3, status: "learning", createdAt: id, updatedAt: id });
+const card = (id: string, question: string, tags: string[], relations: CardRelation[] = []): Card => ({ id, question, questionVariants: [], relations, answer: question, answerPoints: [{ id: `${id}-point`, content: question, hint: "", note: "" }], note: "", track: "Agent", tags, difficulty: 3, status: "learning", createdAt: id, updatedAt: id });
 
 describe("semantic metadata recommendations", () => {
   it("retrieves related cards and aggregates their unselected tags", async () => {
@@ -19,5 +20,25 @@ describe("semantic metadata recommendations", () => {
 
   it("uses every card field as semantic recommendation input", () => {
     expect(recommendationText({ question: "主问题", questionVariants: [{ id: "variant", content: "其他问法", source: "manual" }], answerPoints: [{ id: "point", content: "答案要点", hint: "", note: "" }], note: "备注", track: "Agent", tags: ["标签"] })).toContain("答案要点");
+  });
+
+  it("preloads multiple cards with shared vectors and preserves each card's exclusions", async () => {
+    const source = card("source", "RAG 检索流程", ["RAG"], [{ cardId: "linked", type: "related" }]);
+    const linked = card("linked", "RAG 重排序", ["RAG", "排序"]);
+    const similar = card("similar", "RAG 召回策略", ["RAG", "检索"]);
+    const unrelated = card("unrelated", "JVM 垃圾回收", ["JVM"]);
+    const cards = [source, linked, similar, unrelated];
+    vi.mocked(embedTexts).mockClear();
+
+    const preloaded = await preloadCardRecommendations(cards, [source.id, similar.id]);
+    expect(embedTexts).toHaveBeenCalledTimes(1);
+    const direct = await recommendCardMetadata(source, cards, [source.id, ...source.relations.map((relation) => relation.cardId)]);
+
+    expect(preloaded[source.id]).toEqual(direct);
+    expect(preloaded[source.id]?.relatedCards.map((item) => item.cardId)).not.toContain(source.id);
+    expect(preloaded[source.id]?.relatedCards.map((item) => item.cardId)).not.toContain(linked.id);
+    expect(preloaded[source.id]?.tags).toContain("检索");
+    expect(preloaded[source.id]?.tags).not.toContain("RAG");
+    expect(embedTexts).toHaveBeenCalledTimes(2);
   });
 });
