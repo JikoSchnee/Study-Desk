@@ -209,14 +209,16 @@ export function CardLibrary() {
             </div>
           </div>
           <h3>{card.question}{card.questionVariants.length > 0 && <span className="variant-count"><Sparkles size={14}/> 另有 {card.questionVariants.length} 种问法</span>}</h3>
-          <p>{card.answer}</p>
-          {card.questionVariants.length > 0 && <details className="variant-details"><summary>查看其他问法</summary><ul>{card.questionVariants.map((item) => <li key={item.id}><span className={`variant-source ${item.source}`}>{item.source === "ai" ? "AI" : "我的"}</span>{item.content}</li>)}</ul></details>}
-          <div className="card-learning-summary">
-            <span><CalendarClock size={14}/> 下次：{compactReviewTime(learning?.nextReviewAt, true)}</span>
-            <span><Clock3 size={14}/> 上次：{compactReviewTime(learning?.lastReviewAt)}</span>
+          <div className="knowledge-card-scroll-content">
+            <p>{card.answer}</p>
+            {card.questionVariants.length > 0 && <details className="variant-details"><summary>查看其他问法</summary><ul>{card.questionVariants.map((item) => <li key={item.id}><span className={`variant-source ${item.source}`}>{item.source === "ai" ? "AI" : "我的"}</span>{item.content}</li>)}</ul></details>}
+            <div className="card-learning-summary">
+              <span><CalendarClock size={14}/> 下次：{compactReviewTime(learning?.nextReviewAt, true)}</span>
+              <span><Clock3 size={14}/> 上次：{compactReviewTime(learning?.lastReviewAt)}</span>
+            </div>
+            <div className="card-meta"><Chip tone="blue">类型：{card.track}</Chip>{card.tags.map((tag) => <Chip key={tag} tone="ink">#{tag}</Chip>)}</div>
+            {isTutorialCard && <p className="tutorial-library-note">演示完成后可点击“归档”暂时收起；若不再需要，勾选后在批量栏选择“永久删除”，它会同时移除学习记录。</p>}
           </div>
-          <div className="card-meta"><Chip tone="blue">类型：{card.track}</Chip>{card.tags.map((tag) => <Chip key={tag} tone="ink">#{tag}</Chip>)}</div>
-          {isTutorialCard && <p className="tutorial-library-note">演示完成后可点击“归档”暂时收起；若不再需要，勾选后在批量栏选择“永久删除”，它会同时移除学习记录。</p>}
           <div className="card-library-actions">{showArchived ? <Button type="button" variant="ghost" className="card-icon-action" data-tooltip="恢复卡片" aria-label="恢复卡片" title="恢复卡片" onClick={() => void bulk("restore", undefined, [card.id])}><Undo2 size={18}/></Button> : <><Button type="button" variant="ghost" className="card-icon-action" data-tooltip="编辑卡片" aria-label="编辑卡片" title="编辑卡片" onClick={() => openCardEditor(card)}><PencilLine size={18}/></Button><Button type="button" variant="ghost" className="card-icon-action" data-tooltip={detailLoading === card.id ? "正在读取卡片详情" : "查看卡片详情"} aria-label={detailLoading === card.id ? "正在读取卡片详情" : "查看卡片详情"} title={detailLoading === card.id ? "正在读取卡片详情" : "查看卡片详情"} disabled={detailLoading === card.id} onClick={() => openCardDetails(card)}><MoreHorizontal size={20}/></Button><Button type="button" variant="ghost" className="card-icon-action" data-tooltip="归档卡片" aria-label="归档卡片" title="归档卡片" onClick={() => void bulk("archive", undefined, [card.id])}><Archive size={18}/></Button></>}</div>
         </Panel>;
       })}</div> : <EmptyState title="没有符合条件的卡片" detail="换个关键词，或清除筛选条件再试试。" /> : <EmptyState title="你的题库还没有内容" detail="从一个你曾经答得不够顺的问题开始记录。" action={<Link href="/cards"><Button>创建第一张卡片</Button></Link>} />}
