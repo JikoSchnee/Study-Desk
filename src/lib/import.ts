@@ -1,4 +1,5 @@
 import { findQuestionCollision, normalizeQuestion, normalizeQuestionVariants } from "@/lib/question-variants";
+import { normalizeTags } from "@/lib/utils";
 import type { AnswerPoint, AnswerPointRole, Card, QuestionVariant } from "@/lib/types";
 
 export type { AnswerPoint } from "@/lib/types";
@@ -61,7 +62,7 @@ export function answerPointsFromStored(value: string | null | undefined, fallbac
   return answerPointsFromText(fallbackAnswer);
 }
 
-export function splitTags(value: string) { return value.split(/[，,|]/).map((tag) => tag.trim()).filter(Boolean); }
+export function splitTags(value: string) { return normalizeTags(value.split(/[，,|]/)); }
 
 export function questionVariantsFromText(value: string): QuestionVariant[] {
   return normalizeQuestionVariants("", value.split(/\r?\n/).map((content, index) => ({

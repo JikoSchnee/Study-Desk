@@ -1,6 +1,6 @@
 "use client";
 
-import { KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";
+import { ChangeEvent, KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 import { ChevronDown, X } from "lucide-react";
 import { appendUniqueValues, matchingOptions } from "@/lib/select-options";
 
@@ -38,10 +38,14 @@ export function SearchableSelect(props: SingleProps | MultipleProps) {
   const { options, placeholder, ariaLabel, allowCustom = false, emptyText = "没有匹配项", required = false, variant = "form" } = props;
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const selectedValuesRef = useRef<string[]>([]);
+  const isComposingRef = useRef(false);
   const listboxId = useId();
   const values = props.multiple ? props.value : props.value ? [props.value] : [];
+  selectedValuesRef.current = values;
   const [query, setQuery] = useState(props.multiple ? "" : props.value);
   const [open, setOpen] = useState(false);
+  const [opensUpward, setOpensUpward] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const matches = useMemo(() => matchingOptions(options, query, props.multiple ? props.value : []), [options, props.multiple, props.value, query]);
 
@@ -59,6 +63,34 @@ export function SearchableSelect(props: SingleProps | MultipleProps) {
     return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
   });
 
+  useEffect(() => {
+    if (!open) return;
+    const updateDirection = () => {
+      const root = rootRef.current;
+      if (!root) return;
+      const control = root.getBoundingClientRect();
+      const modal = root.closest<HTMLElement>(".card-editor-modal");
+      const modalBounds = modal?.getBoundingClientRect();
+      const topBoundary = Math.max(0, modalBounds?.top ?? 0);
+      const modalBottom = Math.min(window.innerHeight, modalBounds?.bottom ?? window.innerHeight);
+      const actionTop = modal?.querySelector<HTMLElement>(".card-editor-actions")?.getBoundingClientRect().top;
+      // A sticky action bar consumes the lower part of the dialog, even though
+      // it is technically still inside the modal's bounding rectangle.
+      const bottomBoundary = actionTop && actionTop > control.bottom ? Math.min(modalBottom, actionTop) : modalBottom;
+      const spaceAbove = control.top - topBoundary - 6;
+      const spaceBelow = bottomBoundary - control.bottom - 6;
+      const menuHeight = Math.min(226, Math.max(48, matches.length * 35 + 14));
+      setOpensUpward(spaceBelow < menuHeight && spaceAbove > spaceBelow);
+    };
+    updateDirection();
+    window.addEventListener("resize", updateDirection);
+    window.addEventListener("scroll", updateDirection, true);
+    return () => {
+      window.removeEventListener("resize", updateDirection);
+      window.removeEventListener("scroll", updateDirection, true);
+    };
+  }, [open, matches.length]);
+
   const selectSingle = (value: string) => {
     if (props.multiple) return;
     props.onChange(value);
@@ -67,7 +99,9 @@ export function SearchableSelect(props: SingleProps | MultipleProps) {
   };
   const selectMultiple = (valuesToAdd: string[]) => {
     if (!props.multiple) return;
-    props.onChange(appendUniqueValues(props.value, valuesToAdd));
+    const next = appendUniqueValues(selectedValuesRef.current, valuesToAdd);
+    selectedValuesRef.current = next;
+    props.onChange(next);
     setQuery("");
     setActiveIndex(0);
   };
@@ -80,6 +114,7 @@ export function SearchableSelect(props: SingleProps | MultipleProps) {
     selectOption(option);
   };
   const commitQuery = () => {
+    if (isComposingRef.current) return;
     const candidate = query.trim();
     if (!candidate) return;
     if (props.multiple) {
@@ -94,7 +129,13 @@ export function SearchableSelect(props: SingleProps | MultipleProps) {
   };
   const removeValue = (value: string) => {
     if (!props.multiple) return;
-    props.onChange(props.value.filter((item) => item !== value));
+    // Remove only the chip that was targeted. This also keeps old cards with
+    // duplicate tags from losing more than one value in a single action.
+    const index = selectedValuesRef.current.indexOf(value);
+    if (index < 0) return;
+    const next = selectedValuesRef.current.filter((_, itemIndex) => itemIndex !== index);
+    selectedValuesRef.current = next;
+    props.onChange(next);
   };
   const clearSingle = () => {
     if (props.multiple) return;
@@ -103,18 +144,38 @@ export function SearchableSelect(props: SingleProps | MultipleProps) {
     inputRef.current?.focus();
   };
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    // Enter is used by Chinese/Japanese/Korean IMEs to confirm a composition.
+    // Treating it as a selection here turns the half-composed text into a tag.
+    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
     if (event.key === "ArrowDown") { event.preventDefault(); setOpen(true); setActiveIndex((index) => Math.min(index + 1, Math.max(matches.length - 1, 0))); return; }
     if (event.key === "ArrowUp") { event.preventDefault(); setOpen(true); setActiveIndex((index) => Math.max(index - 1, 0)); return; }
     if (event.key === "Escape") { event.preventDefault(); setOpen(false); setQuery(props.multiple ? "" : props.value); return; }
     if (event.key === "Enter") { event.preventDefault(); const active = matches[activeIndex]; if (active) selectOption(active); else commitQuery(); return; }
     if (props.multiple && [",", "，", "|"].includes(event.key)) { event.preventDefault(); commitQuery(); }
-    if (props.multiple && event.key === "Backspace" && !query && props.value.length) removeValue(props.value.at(-1)!);
+    if (props.multiple && event.key === "Backspace" && !query && selectedValuesRef.current.length) removeValue(selectedValuesRef.current.at(-1)!);
   };
 
-  return <div className={`searchable-select ${variant} ${open ? "open" : ""}`} ref={rootRef}>
+  const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const value = event.target.value;
+    if (isComposingRef.current) {
+      setQuery(value);
+      setOpen(true);
+      setActiveIndex(0);
+      return;
+    }
+    if (props.multiple && /[，,|]$/.test(value)) {
+      selectMultiple(value.split(/[，,|]/).filter(Boolean));
+      return;
+    }
+    setQuery(value);
+    setOpen(true);
+    setActiveIndex(0);
+  };
+
+  return <div className={`searchable-select ${variant} ${open ? "open" : ""} ${opensUpward ? "opens-upward" : ""}`} ref={rootRef}>
     <div className="searchable-select-control" onMouseDown={(event) => { if (event.target === event.currentTarget) inputRef.current?.focus(); }}>
       {props.multiple && values.map((value) => <span className="searchable-select-chip" key={value}>#{value}<button type="button" onPointerDown={(event) => event.preventDefault()} onClick={(event) => { event.stopPropagation(); removeValue(value); }} aria-label={`移除标签 ${value}`}><X size={13}/></button></span>)}
-      <input ref={inputRef} value={query} required={required} aria-label={ariaLabel} aria-autocomplete="list" aria-controls={listboxId} aria-expanded={open} role="combobox" placeholder={values.length && props.multiple ? "继续输入标签" : placeholder} onFocus={() => { setOpen(true); setActiveIndex(0); }} onChange={(event) => { const value = event.target.value; if (props.multiple && /[，,|]$/.test(value)) { selectMultiple(value.split(/[，,|]/).filter(Boolean)); return; } setQuery(value); setOpen(true); setActiveIndex(0); }} onKeyDown={handleKeyDown} onBlur={() => window.setTimeout(() => { if (!rootRef.current?.contains(document.activeElement)) { commitQuery(); setOpen(false); } }, 0)} />
+      <input ref={inputRef} value={query} required={required} aria-label={ariaLabel} aria-autocomplete="list" aria-controls={listboxId} aria-expanded={open} role="combobox" placeholder={values.length && props.multiple ? "继续输入标签" : placeholder} onFocus={() => { setOpen(true); setActiveIndex(0); }} onCompositionStart={() => { isComposingRef.current = true; }} onCompositionEnd={(event) => { isComposingRef.current = false; setQuery(event.currentTarget.value); setOpen(true); setActiveIndex(0); }} onChange={handleChange} onKeyDown={handleKeyDown} onBlur={() => window.setTimeout(() => { if (!rootRef.current?.contains(document.activeElement)) { commitQuery(); setOpen(false); } }, 0)} />
       {!props.multiple && props.value && <button type="button" className="searchable-select-clear" onMouseDown={(event) => event.preventDefault()} onClick={clearSingle} aria-label={`清除${ariaLabel}`}><X size={15}/></button>}
       <ChevronDown className="searchable-select-arrow" size={17}/>
     </div>

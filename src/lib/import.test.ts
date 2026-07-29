@@ -17,6 +17,7 @@ describe("card import normalization", () => {
   it("turns multi-line answers and common tag separators into readable fields", () => {
     expect(answerPointsFromText("定义\n- 原理\n• 场景", "概念\n机制")).toMatchObject([{ content: "定义", hint: "概念" }, { content: "原理", hint: "机制" }, { content: "场景", hint: "" }]);
     expect(splitTags("RAG，检索|评估, Agent")).toEqual(["RAG", "检索", "评估", "Agent"]);
+    expect(splitTags("RAG, rag, 检索, 检索")).toEqual(["RAG", "检索"]);
   });
 
   it("keeps stored hints and safely falls back for legacy or malformed cards", () => {
