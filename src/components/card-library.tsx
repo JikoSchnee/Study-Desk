@@ -1,17 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Archive, ArrowUpDown, CalendarClock, CheckCircle2, Clock3, Download, FilePlus2, LibraryBig, MessageSquareText, MoreHorizontal, PencilLine, Search, Sparkles, Tag, Trash2, Undo2, X } from "lucide-react";
+import { FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Archive, ArrowUpDown, CalendarClock, CheckCircle2, Clock3, Download, FilePlus2, LayoutGrid, LibraryBig, MessageSquareText, MoreHorizontal, PencilLine, Search, Sparkles, Tag, Trash2, Undo2, X } from "lucide-react";
 import { CardDetailsDialog } from "@/components/card-details-dialog";
 import { AnswerStructureEditor as AnswerPointsEditor, cardRecommendationDraftKey, cardRecommendationExcludedIds, type CardRecommendationDraft, type CardRecommendationResult, QuestionWordingsEditor, RelatedCardsEditor, TagRecommendations, useCardRecommendations } from "@/components/card-form-editors";
-import { DifficultyPreviewDialog } from "@/components/difficulty-preview-dialog";
+import { RarityPreviewDialog } from "@/components/rarity-preview-dialog";
+import { KnowledgeBaseExamplesDialog } from "@/components/knowledge-base-examples-dialog";
+import { KnowledgeCardFrame } from "@/components/knowledge-card-frame";
 import { LLMConfigurationDialog } from "@/components/llm-configuration-dialog";
 import { PageHeader, PageLayout } from "@/components/page-layout";
 import { SearchableSelect } from "@/components/searchable-select";
-import { Button, Chip, EmptyState, Panel } from "@/components/ui";
+import { Button, Chip, EmptyState } from "@/components/ui";
 import { useTour } from "@/components/tour";
 import { difficultyTier, filterAndSortCards, type CardSort, type SortDirection } from "@/lib/card-filters";
+import { rarityPreset, stabilityRarityTier, type StabilityRarityPreset } from "@/lib/card-tiers";
 import { answerPointsToNumberedText, splitTags } from "@/lib/import";
 import type { AnswerPoint, Card, CardLearningDetails, CardLearningSummary, CardRelation, CardRelationType, QuestionVariant } from "@/lib/types";
 
@@ -38,8 +41,6 @@ function targetsCardControl(target: EventTarget | null) {
   return target instanceof Element && Boolean(target.closest("button, a, input, select, textarea, label, summary, details, [data-card-interactive]"));
 }
 
-const cardTiltMediaQuery = "(hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference)";
-const cardTiltLimit = 5;
 const recommendationPreloadDistance = 3 * (470 + 16);
 
 function recommendationDraftForCard(card: Card): CardRecommendationDraft {
@@ -151,32 +152,6 @@ function useCardRecommendationPreload() {
   return { recommendations, registerCard, clear };
 }
 
-function canTiltCard(event: ReactPointerEvent<HTMLElement>) {
-  return event.pointerType === "mouse" && window.matchMedia(cardTiltMediaQuery).matches;
-}
-
-function beginCardTilt(event: ReactPointerEvent<HTMLElement>) {
-  if (canTiltCard(event)) event.currentTarget.dataset.tilting = "true";
-}
-
-function updateCardTilt(event: ReactPointerEvent<HTMLElement>) {
-  if (!canTiltCard(event)) return;
-
-  const card = event.currentTarget;
-  const bounds = card.getBoundingClientRect();
-  const offsetX = (event.clientX - bounds.left) / bounds.width - .5;
-  const offsetY = (event.clientY - bounds.top) / bounds.height - .5;
-
-  card.style.setProperty("--card-rotate-x", `${-offsetY * cardTiltLimit * 2}deg`);
-  card.style.setProperty("--card-rotate-y", `${offsetX * cardTiltLimit * 2}deg`);
-}
-
-function resetCardTilt(event: ReactPointerEvent<HTMLElement>) {
-  delete event.currentTarget.dataset.tilting;
-  event.currentTarget.style.removeProperty("--card-rotate-x");
-  event.currentTarget.style.removeProperty("--card-rotate-y");
-}
-
 export function CardLibrary() {
   const { tutorialCardId } = useTour();
   const [cards, setCards] = useState<Card[]>([]);
@@ -197,7 +172,9 @@ export function CardLibrary() {
   const [aiCandidates, setAiCandidates] = useState<QuestionVariant[]>([]);
   const [aiBusy, setAiBusy] = useState(false);
   const [needsLLMConfiguration, setNeedsLLMConfiguration] = useState(false);
-  const [difficultyPreviewOpen, setDifficultyPreviewOpen] = useState(false);
+  const [rarityPreviewOpen, setRarityPreviewOpen] = useState(false);
+  const [knowledgeExamplesOpen, setKnowledgeExamplesOpen] = useState(false);
+  const [stabilityRarityPreset, setStabilityRarityPreset] = useState<StabilityRarityPreset>("memory-cycle");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showArchived, setShowArchived] = useState(false);
   const editorSaveStatusRef = useRef<HTMLDivElement>(null);
@@ -212,7 +189,14 @@ export function CardLibrary() {
   }, [editingCard, preloadedEditorResult]);
   const editorRecommendations = useCardRecommendations(editorRecommendationDraft, editingCard?.id, editingDraft?.relations ?? [], preloadedEditorRecommendations);
 
-  const load = useCallback(() => fetch("/api/cards").then((response) => response.json()).then((data) => { setCards(data.cards); setLearningByCardId(data.learning ?? {}); }), []);
+  const load = useCallback(() => Promise.all([
+    fetch("/api/cards").then((response) => response.json()),
+    fetch("/api/settings").then((response) => response.json()),
+  ]).then(([data, settings]) => {
+    setCards(data.cards);
+    setLearningByCardId(data.learning ?? {});
+    setStabilityRarityPreset(rarityPreset(settings.stabilityRarityPreset));
+  }), []);
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     if (!tutorialCardId) return;
@@ -320,8 +304,8 @@ export function CardLibrary() {
     const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = `mock-interview-cards.${format}`; link.click(); URL.revokeObjectURL(url);
   };
 
-  return <PageLayout className="cards-library-page">{detail && <CardDetailsDialog card={detail.card} relatedCards={detail.relatedCards} learning={detail.learning} onClose={() => setDetail(null)} />}{difficultyPreviewOpen && <DifficultyPreviewDialog onClose={() => setDifficultyPreviewOpen(false)} />}<LLMConfigurationDialog open={needsLLMConfiguration} onClose={() => setNeedsLLMConfiguration(false)} purpose="AI 补充问法" />
-    <PageHeader eyebrow={<><LibraryBig size={15}/> 卡片库</>} title="把积累的知识，随时翻出来练。" description="筛选、编辑或查看学习轨迹，让每一张卡片保持可用。" tour="library" actions={<Link href="/cards"><Button><FilePlus2 size={17}/> 创建或导入卡片</Button></Link>} />
+  return <PageLayout className="cards-library-page">{detail && <CardDetailsDialog card={detail.card} relatedCards={detail.relatedCards} learning={detail.learning} onClose={() => setDetail(null)} />}{rarityPreviewOpen && <RarityPreviewDialog preset={stabilityRarityPreset} onClose={() => setRarityPreviewOpen(false)} />}{knowledgeExamplesOpen && <KnowledgeBaseExamplesDialog preset={stabilityRarityPreset} onClose={() => setKnowledgeExamplesOpen(false)} />}<LLMConfigurationDialog open={needsLLMConfiguration} onClose={() => setNeedsLLMConfiguration(false)} purpose="AI 补充问法" />
+    <PageHeader eyebrow={<><LibraryBig size={15}/> 卡片库</>} title="把积累的知识，随时翻出来练。" description="筛选、编辑或查看学习轨迹，让每一张卡片保持可用。" tour="library" actions={<><Button type="button" variant="secondary" onClick={() => setKnowledgeExamplesOpen(true)}><LayoutGrid size={17}/> 知识库示例</Button><Link href="/cards"><Button><FilePlus2 size={17}/> 创建或导入卡片</Button></Link></>} />
     {notice && <div className="notice" role="status" style={{ marginBottom: 20 }}>{notice}</div>}
     {editingCard && editingDraft && <div className="card-editor-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeEditor(); }}><section className="card-editor-modal" role="dialog" aria-modal="true" aria-labelledby="card-editor-title" aria-busy={editorSaveState !== "idle"}>
       <div className="card-editor-content" inert={editorSaveState !== "idle"} aria-hidden={editorSaveState !== "idle"}>
@@ -347,31 +331,32 @@ export function CardLibrary() {
       </div><div data-tour="library-selection">{selectedIds.size > 0 && <div className="bulk-card-toolbar" role="status"><strong>已选择 {selectedIds.size} 张</strong>{showArchived ? <Button variant="secondary" onClick={() => bulk("restore")}><Undo2 size={16}/> 恢复</Button> : <Button variant="secondary" onClick={() => bulk("archive")}><Archive size={16}/> 归档</Button>}<Button variant="ghost" onClick={() => { const value = window.prompt("添加标签（用逗号分隔）"); if (value) void bulk("addTags", splitTags(value)); }}><Tag size={16}/> 添加标签</Button><Button variant="ghost" onClick={() => { const value = window.prompt("移动到知识库类型"); if (value) void bulk("move", value); }}>移动类型</Button><Button variant="ghost" onClick={() => exportSelected("csv")}><Download size={16}/> CSV</Button><Button variant="ghost" onClick={() => exportSelected("json")}><Download size={16}/> JSON</Button><Button variant="danger" onClick={() => bulk("delete")}><Trash2 size={16}/> 永久删除</Button><button type="button" className="clear-card-filters" onClick={() => setSelectedIds(new Set())}>取消选择</button></div>}</div></>}
       {cards.length ? visibleCards.length ? <div className="card-grid">{visibleCards.map((card) => {
         const learning = learningByCardId[card.id];
-        const tier = difficultyTier(learning?.fsrsDifficulty);
+        const difficulty = difficultyTier(learning?.fsrsDifficulty);
+        const rarity = stabilityRarityTier(learning?.fsrsStability, stabilityRarityPreset);
+        const stability = learning?.fsrsStability ?? 0;
         const isTutorialCard = card.id === tutorialCardId;
         const selectionMode = selectedIds.size > 0;
         const selected = selectedIds.has(card.id);
-        return <Panel
-          className={`knowledge-card ${selectionMode ? "selection-mode" : ""} ${selected ? "selected" : ""}`}
+        return <KnowledgeCardFrame
+          className={`${selectionMode ? "selection-mode" : ""} ${selected ? "selected" : ""}`}
           key={card.id}
           ref={(node) => recommendationPreload.registerCard(card, node)}
+          tilt
+          rarity={rarity.label}
+          stability={stability}
+          difficulty={difficulty && learning?.fsrsDifficulty !== null && learning?.fsrsDifficulty !== undefined ? { ...difficulty, value: learning.fsrsDifficulty } : null}
+          onRarityClick={() => setRarityPreviewOpen(true)}
+          rarityAriaLabel={`${rarity.label} 稀有度，Stability ${stability.toFixed(1)} 天。点击查看当前稀有度方案`}
+          topLeft={<label className="card-select"><input type="checkbox" checked={selected} onChange={() => toggleSelected(card.id)} /> 选择</label>}
+          indicators={(card.note.trim() || card.answerPoints.some((item) => item.note.trim())) && <span className="note-count"><MessageSquareText size={14}/> 有批注</span>}
+          title={<>{card.question}{card.questionVariants.length > 0 && <span className="variant-count"><Sparkles size={14}/> 另有 {card.questionVariants.length} 种问法</span>}</>}
+          footer={<div className="card-library-actions">{showArchived ? <Button type="button" variant="ghost" className="card-icon-action" data-tooltip="恢复卡片" aria-label="恢复卡片" title="恢复卡片" onClick={() => void bulk("restore", undefined, [card.id])}><Undo2 size={18}/></Button> : <><Button type="button" variant="ghost" className="card-icon-action" data-tooltip="编辑卡片" aria-label="编辑卡片" title="编辑卡片" onClick={() => openCardEditor(card)}><PencilLine size={18}/></Button><Button type="button" variant="ghost" className="card-icon-action" data-tooltip={detailLoading === card.id ? "正在读取卡片详情" : "查看卡片详情"} aria-label={detailLoading === card.id ? "正在读取卡片详情" : "查看卡片详情"} title={detailLoading === card.id ? "正在读取卡片详情" : "查看卡片详情"} disabled={detailLoading === card.id} onClick={() => openCardDetails(card)}><MoreHorizontal size={20}/></Button><Button type="button" variant="ghost" className="card-icon-action" data-tooltip="归档卡片" aria-label="归档卡片" title="归档卡片" onClick={() => void bulk("archive", undefined, [card.id])}><Archive size={18}/></Button></>}</div>}
           data-tour={isTutorialCard ? "tutorial-library-card" : "library-card"}
           tabIndex={selectionMode ? 0 : undefined}
           aria-label={selectionMode ? `${card.question}，${selected ? "已选择" : "未选择"}。按 Enter 或空格切换选择。` : undefined}
           onClick={(event) => selectFromCardSurface(event, card.id)}
           onKeyDown={(event) => selectFromCardKeyboard(event, card.id)}
-          onPointerEnter={beginCardTilt}
-          onPointerMove={updateCardTilt}
-          onPointerLeave={resetCardTilt}
         >
-          <div className="knowledge-card-top">
-            <label className="card-select"><input type="checkbox" checked={selected} onChange={() => toggleSelected(card.id)} /> 选择</label>
-            <div className="card-indicators">
-              {(card.note.trim() || card.answerPoints.some((item) => item.note.trim())) && <span className="note-count"><MessageSquareText size={14}/> 有批注</span>}
-              {tier && <button type="button" className={`difficulty-badge difficulty-trigger difficulty-${tier.label.toLowerCase()}`} onClick={() => setDifficultyPreviewOpen(true)} title={`FSRS 难度 ${learning?.fsrsDifficulty?.toFixed(1)} / 10；点击查看五档标签说明`} aria-label={`${tier.label} 难度，FSRS ${learning?.fsrsDifficulty?.toFixed(1)} / 10。点击查看五档标签说明`}>{tier.label}<small>{learning?.fsrsDifficulty?.toFixed(1)}</small></button>}
-            </div>
-          </div>
-          <h3>{card.question}{card.questionVariants.length > 0 && <span className="variant-count"><Sparkles size={14}/> 另有 {card.questionVariants.length} 种问法</span>}</h3>
           <div className="knowledge-card-scroll-content">
             <details className="card-answer-details">
               <summary>
@@ -387,8 +372,7 @@ export function CardLibrary() {
             <div className="card-meta"><Chip tone="blue">类型：{card.track}</Chip>{card.tags.map((tag) => <Chip key={tag} tone="ink">#{tag}</Chip>)}</div>
             {isTutorialCard && <p className="tutorial-library-note">演示完成后可点击“归档”暂时收起；若不再需要，勾选后在批量栏选择“永久删除”，它会同时移除学习记录。</p>}
           </div>
-          <div className="card-library-actions">{showArchived ? <Button type="button" variant="ghost" className="card-icon-action" data-tooltip="恢复卡片" aria-label="恢复卡片" title="恢复卡片" onClick={() => void bulk("restore", undefined, [card.id])}><Undo2 size={18}/></Button> : <><Button type="button" variant="ghost" className="card-icon-action" data-tooltip="编辑卡片" aria-label="编辑卡片" title="编辑卡片" onClick={() => openCardEditor(card)}><PencilLine size={18}/></Button><Button type="button" variant="ghost" className="card-icon-action" data-tooltip={detailLoading === card.id ? "正在读取卡片详情" : "查看卡片详情"} aria-label={detailLoading === card.id ? "正在读取卡片详情" : "查看卡片详情"} title={detailLoading === card.id ? "正在读取卡片详情" : "查看卡片详情"} disabled={detailLoading === card.id} onClick={() => openCardDetails(card)}><MoreHorizontal size={20}/></Button><Button type="button" variant="ghost" className="card-icon-action" data-tooltip="归档卡片" aria-label="归档卡片" title="归档卡片" onClick={() => void bulk("archive", undefined, [card.id])}><Archive size={18}/></Button></>}</div>
-        </Panel>;
+        </KnowledgeCardFrame>;
       })}</div> : <EmptyState title="没有符合条件的卡片" detail="换个关键词，或清除筛选条件再试试。" /> : <EmptyState title="你的题库还没有内容" detail="从一个你曾经答得不够顺的问题开始记录。" action={<Link href="/cards"><Button>创建第一张卡片</Button></Link>} />}
     </section>
   </PageLayout>;

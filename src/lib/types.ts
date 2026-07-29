@@ -68,6 +68,7 @@ export interface CardLearningSummary {
   hasInitialPractice: boolean;
   averageScore: number | null;
   fsrsDifficulty: number | null;
+  fsrsStability: number | null;
 }
 
 export interface CardLearningHistoryPoint {

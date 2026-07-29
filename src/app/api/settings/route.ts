@@ -7,6 +7,11 @@ export async function GET() {
   return NextResponse.json({ ...getAppSettings(), llmConfigured: getEnvironmentSettings().apiKeyConfigured });
 }
 export async function PUT(request: Request) {
-  const input = z.object({ dailyInitialTarget: z.number().int().min(0).max(100), dailyReviewTarget: z.number().int().min(0).max(200), answerComparisonMode: z.enum(["embedding", "llm"]).default("embedding") }).parse(await request.json());
+  const input = z.object({
+    dailyInitialTarget: z.number().int().min(0).max(100),
+    dailyReviewTarget: z.number().int().min(0).max(200),
+    answerComparisonMode: z.enum(["embedding", "llm"]).default("embedding"),
+    stabilityRarityPreset: z.enum(["fast", "memory-cycle", "long-term"]).default("memory-cycle"),
+  }).parse(await request.json());
   return NextResponse.json(saveAppSettings(input));
 }

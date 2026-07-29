@@ -1,12 +1,6 @@
 import type { Card, CardLearningSummary } from "@/lib/types";
 
-export const difficultyTiers = [
-  { label: "N", min: 1, max: 2.8 },
-  { label: "R", min: 2.8, max: 4.6 },
-  { label: "SR", min: 4.6, max: 6.4 },
-  { label: "SSR", min: 6.4, max: 8.2 },
-  { label: "UR", min: 8.2, max: 10.000001 },
-] as const;
+export { difficultyTier, difficultyTiers } from "@/lib/card-tiers";
 
 export type CardSort = "updated" | "created" | "review" | "practice" | "difficulty";
 export type SortDirection = "asc" | "desc";
@@ -18,11 +12,6 @@ export type CardFilterState = {
   sort: CardSort;
   direction: SortDirection;
 };
-
-export function difficultyTier(value: number | null | undefined) {
-  if (value === null || value === undefined || !Number.isFinite(value) || value < 1 || value > 10) return null;
-  return difficultyTiers.find((tier) => value >= tier.min && value < tier.max) ?? difficultyTiers.at(-1)!;
-}
 
 function searchableText(card: Card) {
   return [

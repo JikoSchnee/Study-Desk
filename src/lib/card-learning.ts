@@ -1,5 +1,6 @@
 import "server-only";
 import { sqlite } from "@/lib/db";
+import { fsrsLearningMetrics } from "@/lib/fsrs-card";
 import type { AnswerComparison, AnswerComparisonMode, CardLearningDetails, CardLearningHistoryPoint, CardLearningSummary, LatestPracticeRecord, RatingName } from "@/lib/types";
 
 type SummaryRow = {
@@ -44,15 +45,8 @@ function comparisonFromStored(value: string | null): AnswerComparison | null {
   } catch { return null; }
 }
 
-function fsrsDifficulty(value: string | null): number | null {
-  if (!value) return null;
-  try {
-    const difficulty = Number((JSON.parse(value) as { difficulty?: unknown }).difficulty);
-    return Number.isFinite(difficulty) && difficulty >= 1 && difficulty <= 10 ? difficulty : null;
-  } catch { return null; }
-}
-
 function summaryFrom(row: SummaryRow): CardLearningSummary {
+  const fsrs = fsrsLearningMetrics(row.fsrs_card);
   return {
     cardId: row.card_id,
     initialStudyAt: row.initial_study_at,
@@ -62,7 +56,8 @@ function summaryFrom(row: SummaryRow): CardLearningSummary {
     reviewCount: Number(row.review_count),
     hasInitialPractice: Boolean(row.has_initial_practice),
     averageScore: row.average_score === null ? null : Math.round(Number(row.average_score)),
-    fsrsDifficulty: fsrsDifficulty(row.fsrs_card),
+    fsrsDifficulty: fsrs.difficulty,
+    fsrsStability: fsrs.stability,
   };
 }
 
@@ -98,6 +93,7 @@ export function cardLearningDetails(cardId: string): CardLearningDetails {
     hasInitialPractice: false,
     averageScore: null,
     fsrsDifficulty: null,
+    fsrsStability: null,
   };
   const rows = sqlite.prepare(`
     SELECT created_at, ai_score, confirmed_rating, next_due_at, is_initial
