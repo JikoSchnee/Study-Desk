@@ -232,11 +232,15 @@ export function CardLibrary() {
   const visibleCards = useMemo(() => filterAndSortCards(cards.filter((card) => showArchived ? card.status === "archived" : card.status !== "archived"), learningByCardId, { query, track: selectedTrack, tags: selectedTags, sort, direction: sortDirection }), [cards, learningByCardId, query, selectedTrack, selectedTags, sort, sortDirection, showArchived]);
   const changeSort = (next: CardSort) => { setSort(next); setSortDirection(next === "review" || next === "difficulty" ? "asc" : "desc"); };
   const clearFilters = () => { setQuery(""); setSelectedTrack(""); setSelectedTags(new Set()); setSort("created"); setSortDirection("desc"); setShowArchived(false); };
+  const completeCardSave = useCallback(() => {
+    setEditingCard(null); setEditingDraft(null); setAiCandidates([]); setEditorSaveError(""); setEditorSaveState("idle"); setEditBusy(false);
+  }, []);
   useEffect(() => {
     if (editorSaveState === "idle") return;
     const frame = window.requestAnimationFrame(() => editorSaveStatusRef.current?.focus({ preventScroll: true }));
-    return () => window.cancelAnimationFrame(frame);
-  }, [editorSaveState]);
+    const completionTimer = editorSaveState === "success" ? window.setTimeout(completeCardSave, 900) : null;
+    return () => { window.cancelAnimationFrame(frame); if (completionTimer !== null) window.clearTimeout(completionTimer); };
+  }, [completeCardSave, editorSaveState]);
 
   const closeEditor = () => {
     if (editBusy || editorSaveState !== "idle") return;
@@ -280,7 +284,10 @@ export function CardLibrary() {
       const response = await fetch("/api/cards", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: editingCard.id, ...editingDraft, track: editingDraft.track.trim(), tags: splitTags(editingDraft.tags) }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "无法保存卡片。");
-      recommendationPreload.clear(); await load();
+      // The mutation response is authoritative.  Render the confirmation immediately
+      // instead of making its visibility depend on a second, unrelated GET request.
+      recommendationPreload.clear();
+      setCards((current) => current.map((card) => card.id === data.card.id ? data.card : card));
       saved = true;
       setEditorSaveState("success");
     } catch (error) {
@@ -288,11 +295,6 @@ export function CardLibrary() {
       setEditorSaveState("idle");
     } finally { if (!saved) setEditBusy(false); }
   };
-  const completeCardSave = () => {
-    if (editorSaveState !== "success") return;
-    setEditingCard(null); setEditingDraft(null); setAiCandidates([]); setEditorSaveError(""); setEditorSaveState("idle"); setEditBusy(false);
-  };
-
   const toggleSelected = (id: string) => setSelectedIds((ids) => { const next = new Set(ids); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   const selectFromCardSurface = (event: ReactMouseEvent<HTMLElement>, id: string) => {
     if (!selectedIds.size || targetsCardControl(event.target)) return;
@@ -327,7 +329,7 @@ export function CardLibrary() {
         {editorSaveError && <div className="card-editor-save-error" role="alert">{editorSaveError}</div>}
         <form className="card-editor-form" onSubmit={saveCardEditor}><QuestionWordingsEditor question={editingDraft.question} variants={editingDraft.questionVariants} candidates={aiCandidates} onChange={({ question, variants }) => setEditingDraft((draft) => draft ? { ...draft, question, questionVariants: variants } : draft)} onCandidatesChange={setAiCandidates} onGenerate={() => generateVariants(editingDraft.question, editingDraft.answerPoints, editingDraft.questionVariants)} busy={aiBusy}/><AnswerPointsEditor points={editingDraft.answerPoints} onChange={(answerPoints) => setEditingDraft({ ...editingDraft, answerPoints })} /> <RelatedCardsEditor cards={cards} value={editingDraft.relations} onChange={(relations) => setEditingDraft({ ...editingDraft, relations })} excludeId={editingCard.id} recommendations={editorRecommendations.relatedCards} recommendationState={editorRecommendations.state}/><label className="field card-note-field">学习备注<textarea rows={4} value={editingDraft.note} onChange={(event) => setEditingDraft({ ...editingDraft, note: event.target.value })} placeholder="记录来源、待核实的信息，或下一次复习时想提醒自己的事。" /></label><div className="form-grid two"><label className="field">知识库类型<SearchableSelect value={editingDraft.track} onChange={(track) => setEditingDraft({ ...editingDraft, track })} options={knowledgeBaseTypeSuggestions} placeholder="选择或输入新类型" ariaLabel="知识库类型" allowCustom required /></label><div className="tag-field-with-recommendations"><div className="field"><span>标签</span><SearchableSelect multiple value={splitTags(editingDraft.tags)} onChange={(values) => setEditingDraft((draft) => draft ? { ...draft, tags: values.join(", ") } : draft)} options={tags} placeholder="选择或输入标签" ariaLabel="标签" allowCustom menuPlacement="top" menuHeader={<TagRecommendations tags={editorRecommendations.tags} state={editorRecommendations.state} onAdd={(tag) => setEditingDraft((draft) => draft ? { ...draft, tags: splitTags([...splitTags(draft.tags), tag].join(", ")).join(", ") } : draft)}/>} /></div></div></div><div className="form-actions card-editor-actions"><Button type="button" variant="ghost" onClick={closeEditor} disabled={editBusy}>取消</Button><Button type="submit" disabled={editBusy}>{editBusy ? "正在保存…" : <><CheckCircle2 size={17}/> 保存修改</>}</Button></div></form>
       </div>
-      {editorSaveState !== "idle" && <div ref={editorSaveStatusRef} className={`card-editor-save-overlay ${editorSaveState}`} role="status" aria-live="polite" aria-atomic="true" tabIndex={-1}>{editorSaveState === "saving" ? <div className="card-editor-save-pending"><span className="card-editor-save-spinner" aria-hidden="true"/><strong>正在保存…</strong><p>正在更新这张卡片</p></div> : <div className="card-editor-save-success" onAnimationEnd={completeCardSave}><span aria-hidden="true"><CheckCircle2 size={46} strokeWidth={3}/></span><strong>保存成功</strong><p>卡片已更新</p></div>}</div>}
+      {editorSaveState !== "idle" && <div ref={editorSaveStatusRef} className={`card-editor-save-overlay ${editorSaveState}`} role="status" aria-live="polite" aria-atomic="true" tabIndex={-1}>{editorSaveState === "saving" ? <div className="card-editor-save-pending"><span className="card-editor-save-spinner" aria-hidden="true"/><strong>正在保存…</strong><p>正在更新这张卡片</p></div> : <div className="card-editor-save-success" onAnimationEnd={(event) => { if (event.target === event.currentTarget) completeCardSave(); }}><span aria-hidden="true"><CheckCircle2 size={46} strokeWidth={3}/></span><strong>保存成功</strong><p>卡片已更新</p></div>}</div>}
     </section></div>}
     <section className="cards-library"><div className="section-title"><h2>已沉淀的卡片</h2><span>{visibleCards.length} / {cards.length} 张</span></div>
       {cards.length > 0 && <><div className="cards-filter-bar" data-tour="library-filters" aria-label="卡片筛选与排序">
