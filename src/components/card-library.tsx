@@ -16,6 +16,7 @@ import { answerPointsToNumberedText, splitTags } from "@/lib/import";
 import type { AnswerPoint, Card, CardLearningDetails, CardLearningSummary, CardRelation, CardRelationType, QuestionVariant } from "@/lib/types";
 
 type CardDraft = { question: string; questionVariants: QuestionVariant[]; relations: CardRelation[]; answerPoints: AnswerPoint[]; note: string; track: string; tags: string; source: string };
+type EditorSaveState = "idle" | "saving" | "success";
 const defaultKnowledgeBaseTypes = ["Agent", "Java 后端", "计算机基础"];
 
 function compactReviewTime(value: string | null | undefined, future = false) {
@@ -191,12 +192,15 @@ export function CardLibrary() {
   const [editingCard, setEditingCard] = useState<Card | null>(null);
   const [editingDraft, setEditingDraft] = useState<CardDraft | null>(null);
   const [editBusy, setEditBusy] = useState(false);
+  const [editorSaveState, setEditorSaveState] = useState<EditorSaveState>("idle");
+  const [editorSaveError, setEditorSaveError] = useState("");
   const [aiCandidates, setAiCandidates] = useState<QuestionVariant[]>([]);
   const [aiBusy, setAiBusy] = useState(false);
   const [needsLLMConfiguration, setNeedsLLMConfiguration] = useState(false);
   const [difficultyPreviewOpen, setDifficultyPreviewOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showArchived, setShowArchived] = useState(false);
+  const editorSaveStatusRef = useRef<HTMLDivElement>(null);
   const recommendationPreload = useCardRecommendationPreload();
   const editorRecommendationDraft = useMemo<CardRecommendationDraft>(() => ({ question: editingDraft?.question ?? "", questionVariants: editingDraft?.questionVariants ?? [], answerPoints: editingDraft?.answerPoints ?? [], note: editingDraft?.note ?? "", track: editingDraft?.track ?? "", tags: splitTags(editingDraft?.tags ?? "") }), [editingDraft]);
   const preloadedEditorResult = editingCard ? recommendationPreload.recommendations[recommendationCacheKey(editingCard)] : undefined;
@@ -228,7 +232,16 @@ export function CardLibrary() {
   const visibleCards = useMemo(() => filterAndSortCards(cards.filter((card) => showArchived ? card.status === "archived" : card.status !== "archived"), learningByCardId, { query, track: selectedTrack, tags: selectedTags, sort, direction: sortDirection }), [cards, learningByCardId, query, selectedTrack, selectedTags, sort, sortDirection, showArchived]);
   const changeSort = (next: CardSort) => { setSort(next); setSortDirection(next === "review" || next === "difficulty" ? "asc" : "desc"); };
   const clearFilters = () => { setQuery(""); setSelectedTrack(""); setSelectedTags(new Set()); setSort("created"); setSortDirection("desc"); setShowArchived(false); };
-  const closeEditor = () => { if (editBusy) return; setEditingCard(null); setEditingDraft(null); setAiCandidates([]); };
+  useEffect(() => {
+    if (editorSaveState === "idle") return;
+    const frame = window.requestAnimationFrame(() => editorSaveStatusRef.current?.focus({ preventScroll: true }));
+    return () => window.cancelAnimationFrame(frame);
+  }, [editorSaveState]);
+
+  const closeEditor = () => {
+    if (editBusy || editorSaveState !== "idle") return;
+    setEditingCard(null); setEditingDraft(null); setAiCandidates([]); setEditorSaveError("");
+  };
   const openCardDetails = async (card: Card) => {
     setDetailLoading(card.id); setNotice("");
     try {
@@ -243,6 +256,8 @@ export function CardLibrary() {
     setEditingCard(card);
     setEditingDraft({ question: card.question, questionVariants: card.questionVariants.map((item) => ({ ...item })), relations: card.relations, answerPoints: card.answerPoints.map((item) => ({ ...item })), note: card.note, track: card.track, tags: card.tags.join(", "), source: card.source ?? "" });
     setAiCandidates([]);
+    setEditorSaveState("idle");
+    setEditorSaveError("");
     setNotice("");
   };
   const generateVariants = async (question: string, answerPoints: AnswerPoint[], existing: QuestionVariant[]) => {
@@ -259,15 +274,23 @@ export function CardLibrary() {
   const saveCardEditor = async (event: FormEvent) => {
     event.preventDefault();
     if (!editingCard || !editingDraft) return;
-    setEditBusy(true);
+    setEditBusy(true); setEditorSaveState("saving"); setEditorSaveError("");
+    let saved = false;
     try {
       const response = await fetch("/api/cards", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: editingCard.id, ...editingDraft, track: editingDraft.track.trim(), tags: splitTags(editingDraft.tags) }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "无法保存卡片。");
-      setNotice(`“${data.card.question}”已更新，复习进度保持不变。`);
-      recommendationPreload.clear(); setEditingCard(null); setEditingDraft(null); setAiCandidates([]); await load();
-    } catch (error) { setNotice(error instanceof Error ? error.message : "无法保存卡片。"); }
-    finally { setEditBusy(false); }
+      recommendationPreload.clear(); await load();
+      saved = true;
+      setEditorSaveState("success");
+    } catch (error) {
+      setEditorSaveError(error instanceof Error ? error.message : "无法保存卡片。");
+      setEditorSaveState("idle");
+    } finally { if (!saved) setEditBusy(false); }
+  };
+  const completeCardSave = () => {
+    if (editorSaveState !== "success") return;
+    setEditingCard(null); setEditingDraft(null); setAiCandidates([]); setEditorSaveError(""); setEditorSaveState("idle"); setEditBusy(false);
   };
 
   const toggleSelected = (id: string) => setSelectedIds((ids) => { const next = new Set(ids); if (next.has(id)) next.delete(id); else next.add(id); return next; });
@@ -298,7 +321,14 @@ export function CardLibrary() {
   return <PageLayout className="cards-library-page">{detail && <CardDetailsDialog card={detail.card} relatedCards={detail.relatedCards} learning={detail.learning} onClose={() => setDetail(null)} />}{difficultyPreviewOpen && <DifficultyPreviewDialog onClose={() => setDifficultyPreviewOpen(false)} />}<LLMConfigurationDialog open={needsLLMConfiguration} onClose={() => setNeedsLLMConfiguration(false)} purpose="AI 补充问法" />
     <PageHeader eyebrow={<><LibraryBig size={15}/> 卡片库</>} title="把积累的知识，随时翻出来练。" description="筛选、编辑或查看学习轨迹，让每一张卡片保持可用。" tour="library" actions={<Link href="/cards"><Button><FilePlus2 size={17}/> 创建或导入卡片</Button></Link>} />
     {notice && <div className="notice" role="status" style={{ marginBottom: 20 }}>{notice}</div>}
-    {editingCard && editingDraft && <div className="card-editor-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeEditor(); }}><section className="card-editor-modal" role="dialog" aria-modal="true" aria-labelledby="card-editor-title"><div className="card-editor-heading"><div><p className="eyebrow"><PencilLine size={15}/> 编辑卡片</p><h2 id="card-editor-title">{editingDraft.question.trim() || "未命名问题"}</h2><p>修改内容不会重置已有的复习进度。</p></div><button className="icon-close" type="button" onClick={closeEditor} disabled={editBusy} aria-label="关闭编辑卡片"><X size={19}/></button></div><form className="card-editor-form" onSubmit={saveCardEditor}><QuestionWordingsEditor question={editingDraft.question} variants={editingDraft.questionVariants} candidates={aiCandidates} onChange={({ question, variants }) => setEditingDraft((draft) => draft ? { ...draft, question, questionVariants: variants } : draft)} onCandidatesChange={setAiCandidates} onGenerate={() => generateVariants(editingDraft.question, editingDraft.answerPoints, editingDraft.questionVariants)} busy={aiBusy}/><AnswerPointsEditor points={editingDraft.answerPoints} onChange={(answerPoints) => setEditingDraft({ ...editingDraft, answerPoints })} /> <RelatedCardsEditor cards={cards} value={editingDraft.relations} onChange={(relations) => setEditingDraft({ ...editingDraft, relations })} excludeId={editingCard.id} recommendations={editorRecommendations.relatedCards} recommendationState={editorRecommendations.state}/><label className="field card-note-field">学习备注<textarea rows={4} value={editingDraft.note} onChange={(event) => setEditingDraft({ ...editingDraft, note: event.target.value })} placeholder="记录来源、待核实的信息，或下一次复习时想提醒自己的事。" /></label><div className="form-grid two"><label className="field">知识库类型<SearchableSelect value={editingDraft.track} onChange={(track) => setEditingDraft({ ...editingDraft, track })} options={knowledgeBaseTypeSuggestions} placeholder="选择或输入新类型" ariaLabel="知识库类型" allowCustom required /></label><div className="tag-field-with-recommendations"><div className="field"><span>标签</span><SearchableSelect multiple value={splitTags(editingDraft.tags)} onChange={(values) => setEditingDraft((draft) => draft ? { ...draft, tags: values.join(", ") } : draft)} options={tags} placeholder="选择或输入标签" ariaLabel="标签" allowCustom menuPlacement="top" menuHeader={<TagRecommendations tags={editorRecommendations.tags} state={editorRecommendations.state} onAdd={(tag) => setEditingDraft((draft) => draft ? { ...draft, tags: splitTags([...splitTags(draft.tags), tag].join(", ")).join(", ") } : draft)}/>} /></div></div></div><div className="form-actions card-editor-actions"><Button type="button" variant="ghost" onClick={closeEditor} disabled={editBusy}>取消</Button><Button type="submit" disabled={editBusy}>{editBusy ? "正在保存…" : <><CheckCircle2 size={17}/> 保存修改</>}</Button></div></form></section></div>}
+    {editingCard && editingDraft && <div className="card-editor-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeEditor(); }}><section className="card-editor-modal" role="dialog" aria-modal="true" aria-labelledby="card-editor-title" aria-busy={editorSaveState !== "idle"}>
+      <div className="card-editor-content" inert={editorSaveState !== "idle"} aria-hidden={editorSaveState !== "idle"}>
+        <div className="card-editor-heading"><div><p className="eyebrow"><PencilLine size={15}/> 编辑卡片</p><h2 id="card-editor-title">{editingDraft.question.trim() || "未命名问题"}</h2><p>修改内容不会重置已有的复习进度。</p></div><button className="icon-close" type="button" onClick={closeEditor} disabled={editBusy} aria-label="关闭编辑卡片"><X size={19}/></button></div>
+        {editorSaveError && <div className="card-editor-save-error" role="alert">{editorSaveError}</div>}
+        <form className="card-editor-form" onSubmit={saveCardEditor}><QuestionWordingsEditor question={editingDraft.question} variants={editingDraft.questionVariants} candidates={aiCandidates} onChange={({ question, variants }) => setEditingDraft((draft) => draft ? { ...draft, question, questionVariants: variants } : draft)} onCandidatesChange={setAiCandidates} onGenerate={() => generateVariants(editingDraft.question, editingDraft.answerPoints, editingDraft.questionVariants)} busy={aiBusy}/><AnswerPointsEditor points={editingDraft.answerPoints} onChange={(answerPoints) => setEditingDraft({ ...editingDraft, answerPoints })} /> <RelatedCardsEditor cards={cards} value={editingDraft.relations} onChange={(relations) => setEditingDraft({ ...editingDraft, relations })} excludeId={editingCard.id} recommendations={editorRecommendations.relatedCards} recommendationState={editorRecommendations.state}/><label className="field card-note-field">学习备注<textarea rows={4} value={editingDraft.note} onChange={(event) => setEditingDraft({ ...editingDraft, note: event.target.value })} placeholder="记录来源、待核实的信息，或下一次复习时想提醒自己的事。" /></label><div className="form-grid two"><label className="field">知识库类型<SearchableSelect value={editingDraft.track} onChange={(track) => setEditingDraft({ ...editingDraft, track })} options={knowledgeBaseTypeSuggestions} placeholder="选择或输入新类型" ariaLabel="知识库类型" allowCustom required /></label><div className="tag-field-with-recommendations"><div className="field"><span>标签</span><SearchableSelect multiple value={splitTags(editingDraft.tags)} onChange={(values) => setEditingDraft((draft) => draft ? { ...draft, tags: values.join(", ") } : draft)} options={tags} placeholder="选择或输入标签" ariaLabel="标签" allowCustom menuPlacement="top" menuHeader={<TagRecommendations tags={editorRecommendations.tags} state={editorRecommendations.state} onAdd={(tag) => setEditingDraft((draft) => draft ? { ...draft, tags: splitTags([...splitTags(draft.tags), tag].join(", ")).join(", ") } : draft)}/>} /></div></div></div><div className="form-actions card-editor-actions"><Button type="button" variant="ghost" onClick={closeEditor} disabled={editBusy}>取消</Button><Button type="submit" disabled={editBusy}>{editBusy ? "正在保存…" : <><CheckCircle2 size={17}/> 保存修改</>}</Button></div></form>
+      </div>
+      {editorSaveState !== "idle" && <div ref={editorSaveStatusRef} className={`card-editor-save-overlay ${editorSaveState}`} role="status" aria-live="polite" aria-atomic="true" tabIndex={-1}>{editorSaveState === "saving" ? <div className="card-editor-save-pending"><span className="card-editor-save-spinner" aria-hidden="true"/><strong>正在保存…</strong><p>正在更新这张卡片</p></div> : <div className="card-editor-save-success" onAnimationEnd={completeCardSave}><span aria-hidden="true"><CheckCircle2 size={46} strokeWidth={3}/></span><strong>保存成功</strong><p>卡片已更新</p></div>}</div>}
+    </section></div>}
     <section className="cards-library"><div className="section-title"><h2>已沉淀的卡片</h2><span>{visibleCards.length} / {cards.length} 张</span></div>
       {cards.length > 0 && <><div className="cards-filter-bar" data-tour="library-filters" aria-label="卡片筛选与排序">
         <div className="cards-filter-row cards-filter-row-primary">
