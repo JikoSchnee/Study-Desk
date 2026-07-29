@@ -59,11 +59,10 @@ export function filterAndSortCards(cards: Card[], learning: Record<string, CardL
     if (filters.track && card.track !== filters.track) return false;
     return !filters.tags.size || card.tags.some((tag) => filters.tags.has(tag));
   });
-  if (filters.sort === "updated") return filtered;
-
   return filtered.slice().sort((left, right) => {
     const leftLearning = learning[left.id];
     const rightLearning = learning[right.id];
+    if (filters.sort === "updated") return compareOptional(left.updatedAt, right.updatedAt, filters.direction);
     if (filters.sort === "created") return compareOptional(left.createdAt, right.createdAt, filters.direction);
     if (filters.sort === "review") return compareOptional(leftLearning?.nextReviewAt, rightLearning?.nextReviewAt, filters.direction);
     if (filters.sort === "practice") return compareOptional(leftLearning?.lastReviewAt, rightLearning?.lastReviewAt, filters.direction);
