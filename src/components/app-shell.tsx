@@ -10,7 +10,7 @@ const nav = [
   ["/", "今日", ClipboardList],
   ["/cards", "录入", FilePlus2],
   ["/library", "卡片库", LibraryBig],
-  ["/review", "复习", BookOpenCheck],
+  ["/review", "学习", BookOpenCheck],
   ["/interview", "面试", Mic2],
   ["/knowledge-base", "知识库", Sparkles],
   ["/settings", "设置", Settings],
