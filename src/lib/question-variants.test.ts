@@ -4,6 +4,7 @@ import {
   isCardQuestion,
   normalizeQuestionVariants,
   pickPresentedQuestion,
+  promoteQuestionVariant,
   questionVariantsFromStored,
 } from "./question-variants";
 
@@ -36,5 +37,14 @@ describe("question variants", () => {
     expect(pickPresentedQuestion(card, 0.99)).toBe("RAG 是如何工作的？");
     expect(isCardQuestion(card, "  请解释一下 RAG ")).toBe(true);
     expect(isCardQuestion(card, "无关问题")).toBe(false);
+  });
+
+  it("promotes any alternative wording without losing the previous primary wording", () => {
+    const result = promoteQuestionVariant("原主问题", variants.slice(0, 2), 1, "former-primary");
+    expect(result.question).toBe("RAG 是如何工作的？");
+    expect(result.variants).toEqual([
+      variants[0],
+      { id: "former-primary", content: "原主问题", source: "manual" },
+    ]);
   });
 });

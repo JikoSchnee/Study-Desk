@@ -35,6 +35,15 @@ export function questionVariantsToJson(question: string, variants: QuestionVaria
   return JSON.stringify(normalizeQuestionVariants(question, variants));
 }
 
+export function promoteQuestionVariant(question: string, variants: QuestionVariant[], index: number, replacementId: string) {
+  const promoted = variants[index];
+  if (!promoted || !promoted.content.trim()) return { question, variants };
+  return {
+    question: promoted.content,
+    variants: [...variants.slice(0, index), { id: replacementId, content: question, source: "manual" as const }, ...variants.slice(index + 1)],
+  };
+}
+
 export function allQuestionTexts(card: Pick<Card, "question" | "questionVariants">) {
   return [card.question, ...card.questionVariants.map((variant) => variant.content)];
 }
