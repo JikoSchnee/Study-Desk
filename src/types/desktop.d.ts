@@ -1,7 +1,7 @@
 export {};
 
 type ManualUpdateStatus =
-  | { state: "current" | "available"; currentVersion: string; latestVersion: string; title: string; notes: string; publishedAt: string | null; url: string }
+  | { state: "current" | "available"; currentVersion: string; latestVersion: string; url: string }
   | { state: "error"; currentVersion: string; message: string };
 
 declare global {

@@ -115,9 +115,6 @@ ipcMain.handle("updates:check", async () => {
       state: compareVersions(latestVersion, currentVersion) > 0 ? "available" : "current",
       currentVersion,
       latestVersion,
-      title: typeof release.name === "string" && release.name.trim() ? release.name : `v${latestVersion}`,
-      notes: typeof release.body === "string" ? release.body : "",
-      publishedAt: typeof release.published_at === "string" ? release.published_at : null,
       url: typeof release.html_url === "string" ? release.html_url : "https://github.com/JikoSchnee/Study-Desk/releases",
     };
   } catch (error) {

@@ -12,7 +12,7 @@ import type { AnswerComparisonMode } from "@/lib/types";
 type EnvironmentSettings = { provider: ModelProviderId; baseUrl: string; model: string; apiKeyConfigured: boolean };
 type LocalEmbeddingModelStatus = { state: "pending" | "downloading" | "verifying" | "retrying" | "ready" | "error"; onnxState: "pending" | "parsing" | "ready" | "failed"; downloadedBytes: number; totalBytes: number | null; attempt: number; error?: string };
 type UpdateCheckResult =
-  | { state: "current" | "available"; currentVersion: string; latestVersion: string; title: string; notes: string; publishedAt: string | null; url: string }
+  | { state: "current" | "available"; currentVersion: string; latestVersion: string; url: string }
   | { state: "error"; currentVersion: string; message: string };
 const CUSTOM_MODEL_OPTION = "__custom_model__";
 
@@ -44,6 +44,7 @@ export default function SettingsPage() {
   const [isDesktop, setIsDesktop] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
+  const [lastCheckedAt, setLastCheckedAt] = useState<Date | null>(null);
 
   useEffect(() => {
     Promise.all([fetch("/api/settings").then((response) => response.json()), fetch("/api/settings/environment").then((response) => response.json())])
@@ -78,7 +79,7 @@ export default function SettingsPage() {
     if (!window.mockInterviewDesktop) return;
     setCheckingUpdate(true);
     setUpdateResult(null);
-    try { setUpdateResult(await window.mockInterviewDesktop.updates.check() as UpdateCheckResult); }
+    try { setUpdateResult(await window.mockInterviewDesktop.updates.check() as UpdateCheckResult); setLastCheckedAt(new Date()); }
     catch { setUpdateResult({ state: "error", currentVersion: "当前版本", message: "检查更新失败，请稍后重试。" }); }
     finally { setCheckingUpdate(false); }
   };
@@ -158,7 +159,7 @@ export default function SettingsPage() {
     </div>
     <section className="settings-utility-grid" aria-label="辅助功能">
       <Panel className="test-features-panel"><p className="eyebrow"><FlaskConical size={15}/> 测试功能</p><h2>开发中的功能</h2><p className="muted-copy">以下功能仍在开发中，可能会调整或不稳定。</p><div className="test-feature-actions"><Link className="button secondary" href="/interview"><Mic2 size={17}/> 进入模拟面试</Link><Link className="button outline" href="/knowledge-base"><Sparkles size={17}/> 进入知识库</Link></div></Panel>
-      <Panel className="desktop-updater"><div className="desktop-updater-heading"><div><p className="eyebrow"><Download size={15}/> 桌面应用</p><h2>手动更新</h2></div>{isDesktop && <Button type="button" variant="outline" disabled={checkingUpdate} onClick={() => void checkForUpdates()}><RefreshCw size={16}/>{checkingUpdate ? "正在检查…" : "检查更新"}</Button>}</div><p className="muted-copy">应用只检查 GitHub Releases 并展示更新报告，不会自动下载或安装更新。</p>{!isDesktop && <p className="muted-copy">请在桌面应用中检查更新，或直接前往下载页。</p>}{updateResult?.state === "error" && <p className="desktop-update-error" role="status">{updateResult.message}</p>}{updateResult?.state === "current" && <p className="desktop-update-ok" role="status">已是最新版本（v{updateResult.currentVersion}）。</p>}{updateResult?.state === "available" && <div className="desktop-update-card" role="status"><div><strong>发现 v{updateResult.latestVersion}</strong><span>当前版本：v{updateResult.currentVersion}{updateResult.publishedAt ? ` · 发布于 ${new Date(updateResult.publishedAt).toLocaleDateString()}` : ""}</span></div><details open><summary>{updateResult.title} · 更新报告</summary>{updateResult.notes ? <pre className="desktop-release-notes">{updateResult.notes}</pre> : <p className="muted-copy">此版本未提供更新说明。</p>}</details><a className="button" href={updateResult.url} target="_blank" rel="noreferrer"><ExternalLink size={16}/> 下载并手动安装</a></div>}<a className="button outline" href="https://github.com/JikoSchnee/Study-Desk/releases" target="_blank" rel="noreferrer"><ExternalLink size={16}/> 前往下载页</a></Panel>
+      <Panel className="desktop-updater"><div className="desktop-updater-heading"><div><p className="eyebrow"><Download size={15}/> 桌面应用</p><h2>手动更新</h2></div>{isDesktop && <Button type="button" variant="outline" disabled={checkingUpdate} onClick={() => void checkForUpdates()}><RefreshCw size={16}/>{checkingUpdate ? "正在检查…" : "检查更新"}</Button>}</div>{!isDesktop && <p className="muted-copy">请在桌面应用中检查更新。</p>}{updateResult?.state === "error" && <p className="desktop-update-error" role="status">{updateResult.message}</p>}{updateResult?.state === "current" && <p className="desktop-update-ok" role="status">已是最新版本：v{updateResult.currentVersion}{lastCheckedAt ? ` · 最后检查时间：${lastCheckedAt.toLocaleString()}` : ""}</p>}{updateResult?.state === "available" && <div className="desktop-update-card" role="status"><strong>有新版本：v{updateResult.latestVersion}</strong><a className="button" href={updateResult.url} target="_blank" rel="noreferrer"><ExternalLink size={16}/> 请前往下载页下载</a></div>}</Panel>
     </section>
     <Panel className="backup-panel"><p className="eyebrow"><ShieldCheck size={15}/> 备份与迁移</p><h2>带走你的训练记录</h2><p className="muted-copy">备份包含卡片、复习、面试、任务和普通设置；不包含 API Key 或本地模型配置。</p><div className="form-actions"><Button type="button" variant="secondary" onClick={downloadBackup}><Download size={17}/> 下载 JSON 备份</Button><label className="button ghost"><Upload size={17}/> 选择备份恢复<input hidden type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void inspectBackup(file); event.target.value = ""; }} /></label></div>{backupPreview && <div className="backup-preview"><strong>已验证备份</strong><span>{Object.entries(backupPreview.counts).map(([key, count]) => `${key} ${count}`).join(" · ")}</span><span>卡片 ID 冲突：{backupPreview.cardConflicts}</span><div className="form-actions"><Button type="button" onClick={() => restoreBackup("merge")}>合并恢复</Button><Button type="button" variant="warning" onClick={() => restoreBackup("replace")}>下载当前备份并替换</Button></div></div>}{backupNotice && <p className="muted-copy" role="status">{backupNotice}</p>}</Panel>
   </PageLayout>;
