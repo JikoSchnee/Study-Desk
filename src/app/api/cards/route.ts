@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createCard, listCards, updateCard } from "@/lib/cards";
 import { cardLearningSummaries } from "@/lib/card-learning";
+import { filterAndSortCards, type CardSort, type SortDirection } from "@/lib/card-filters";
 import { answerFromPoints, answerPointHierarchyError, answerPointsFromText, hasCoreAnswerPoint } from "@/lib/import";
 
 const questionVariantSchema = z.object({ id: z.string().min(1), content: z.string(), source: z.enum(["manual", "ai"]) });
@@ -27,9 +28,45 @@ const updateCardSchema = cardInputSchema.extend({ id: z.string().uuid(), answerP
   return { ...value, answer };
 });
 
-export async function GET() {
-  const cards = listCards();
-  return NextResponse.json({ cards, learning: cardLearningSummaries(cards.map((card) => card.id)) });
+const cardQuerySchema = z.object({
+  offset: z.coerce.number().int().min(0).default(0),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  query: z.string().default(""),
+  track: z.string().default(""),
+  tags: z.array(z.string()).default([]),
+  sort: z.enum(["updated", "created", "review", "practice", "difficulty"]).default("created"),
+  direction: z.enum(["asc", "desc"]).default("desc"),
+  archived: z.enum(["true", "false"]).default("false"),
+});
+
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const input = cardQuerySchema.parse({
+    offset: url.searchParams.get("offset") ?? undefined,
+    limit: url.searchParams.get("limit") ?? undefined,
+    query: url.searchParams.get("query") ?? undefined,
+    track: url.searchParams.get("track") ?? undefined,
+    tags: url.searchParams.getAll("tag"),
+    sort: url.searchParams.get("sort") ?? undefined,
+    direction: url.searchParams.get("direction") ?? undefined,
+    archived: url.searchParams.get("archived") ?? undefined,
+  });
+  const allCards = listCards();
+  const catalog = allCards.filter((card) => input.archived === "true" ? card.status === "archived" : card.status !== "archived");
+  const catalogLearning = cardLearningSummaries(catalog.map((card) => card.id));
+  const matching = filterAndSortCards(catalog, catalogLearning, { query: input.query, track: input.track, tags: new Set(input.tags), sort: input.sort as CardSort, direction: input.direction as SortDirection });
+  const cards = matching.slice(input.offset, input.offset + input.limit);
+  return NextResponse.json({
+    cards,
+    learning: Object.fromEntries(cards.flatMap((card) => catalogLearning[card.id] ? [[card.id, catalogLearning[card.id]]] : [])),
+    total: matching.length,
+    catalogTotal: catalog.length,
+    hasMore: input.offset + cards.length < matching.length,
+    facets: {
+      tracks: [...new Set(allCards.map((card) => card.track))].sort((left, right) => left.localeCompare(right, "zh-CN")),
+      tags: [...new Set(allCards.flatMap((card) => card.tags))].sort((left, right) => left.localeCompare(right, "zh-CN")),
+    },
+  });
 }
 export async function POST(request: Request) {
   try {

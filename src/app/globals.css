@@ -375,6 +375,13 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .advanced-import { margin-top: 24px; padding: 18px 20px; background: var(--polar); border: 2px solid #e3e3e3; border-radius: 14px; }.advanced-import summary { cursor: pointer; font-weight: 900; }.advanced-import p { color: var(--muted); font-size: 13px; font-weight: 800; }.advanced-import textarea { width: 100%; min-height: 150px; padding: 12px; color: var(--eel); background: #fff; border: 2px solid #d7d7d7; border-radius: 13px; resize: vertical; }
 
 .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); grid-auto-rows: 550px; gap: 16px; }
+.cards-loading, .cards-load-more { display: grid; place-items: center; min-height: 76px; color: #66808b; font-size: 12px; font-weight: 900; text-align: center; }
+.cards-load-more { min-height: 64px; }
+.library-scroll-toggle { position: fixed; top: max(14px, env(safe-area-inset-top)); left: 50%; z-index: 24; display: grid; place-items: center; width: 48px; height: 48px; padding: 0; color: #176b91; background: rgb(246 253 255 / .96); border: 2px solid #8bd1ee; border-bottom: 4px solid #5caeca; border-radius: 999px; box-shadow: 0 10px 25px rgb(20 90 120 / .22); cursor: pointer; transform: translateX(-50%); transition: background-color var(--motion), border-color var(--motion), color var(--motion), box-shadow var(--motion), opacity 160ms ease; animation: library-scroll-toggle-in 180ms ease-out; }
+.library-scroll-toggle:hover { color: #075372; background: #e8f8ff; border-color: #52bde5; border-bottom-color: #278eaf; box-shadow: 0 13px 30px rgb(20 90 120 / .28); }
+.library-scroll-toggle:active { border-bottom-width: 2px; transform: translateX(-50%) translateY(2px); }
+.library-scroll-toggle:focus-visible { outline: 3px solid #ffd55a; outline-offset: 3px; }
+@keyframes library-scroll-toggle-in { from { opacity: 0; transform: translateX(-50%) translateY(-10px) scale(.88); } to { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); } }
 .knowledge-card {
   --card-rotate-x: 0deg;
   --card-rotate-y: 0deg;

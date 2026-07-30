@@ -51,10 +51,11 @@ export function filterAndSortCards(cards: Card[], learning: Record<string, CardL
   return filtered.slice().sort((left, right) => {
     const leftLearning = learning[left.id];
     const rightLearning = learning[right.id];
-    if (filters.sort === "updated") return compareOptional(left.updatedAt, right.updatedAt, filters.direction);
-    if (filters.sort === "created") return compareOptional(left.createdAt, right.createdAt, filters.direction);
-    if (filters.sort === "review") return compareOptional(leftLearning?.nextReviewAt, rightLearning?.nextReviewAt, filters.direction);
-    if (filters.sort === "practice") return compareOptional(leftLearning?.lastReviewAt, rightLearning?.lastReviewAt, filters.direction);
-    return compareDifficulty(leftLearning?.fsrsDifficulty, rightLearning?.fsrsDifficulty, filters.direction);
+    const comparison = filters.sort === "updated" ? compareOptional(left.updatedAt, right.updatedAt, filters.direction)
+      : filters.sort === "created" ? compareOptional(left.createdAt, right.createdAt, filters.direction)
+        : filters.sort === "review" ? compareOptional(leftLearning?.nextReviewAt, rightLearning?.nextReviewAt, filters.direction)
+          : filters.sort === "practice" ? compareOptional(leftLearning?.lastReviewAt, rightLearning?.lastReviewAt, filters.direction)
+            : compareDifficulty(leftLearning?.fsrsDifficulty, rightLearning?.fsrsDifficulty, filters.direction);
+    return comparison || left.id.localeCompare(right.id);
   });
 }

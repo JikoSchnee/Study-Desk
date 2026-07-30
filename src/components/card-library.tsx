@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Archive, ArrowUpDown, CalendarClock, CheckCircle2, Clock3, Download, FilePlus2, FileSpreadsheet, LayoutGrid, LibraryBig, MessageSquareText, MoreHorizontal, PencilLine, Search, Sparkles, Tag, Tags, Trash2, Undo2, X } from "lucide-react";
+import { Archive, ArrowDown, ArrowUp, ArrowUpDown, CalendarClock, CheckCircle2, Clock3, Download, FilePlus2, FileSpreadsheet, LayoutGrid, LibraryBig, MessageSquareText, MoreHorizontal, PencilLine, Search, Sparkles, Tag, Tags, Trash2, Undo2, X } from "lucide-react";
 import { CardWorkspace } from "@/components/card-workspace";
 import { CardDetailsDialog } from "@/components/card-details-dialog";
 import { AnswerStructureEditor as AnswerPointsEditor, cardRecommendationDraftKey, cardRecommendationExcludedIds, type CardRecommendationDraft, type CardRecommendationResult, QuestionWordingsEditor, RelatedCardsEditor, TagRecommendations, useCardRecommendations } from "@/components/card-form-editors";
@@ -15,7 +15,7 @@ import { PageHeader, PageLayout } from "@/components/page-layout";
 import { SearchableSelect } from "@/components/searchable-select";
 import { Button, Chip, EmptyState } from "@/components/ui";
 import { TourButton } from "@/components/tour";
-import { difficultyTier, filterAndSortCards, type CardSort, type SortDirection } from "@/lib/card-filters";
+import { difficultyTier, type CardSort, type SortDirection } from "@/lib/card-filters";
 import { rarityPreset, stabilityRarityTier, type StabilityRarityPreset } from "@/lib/card-tiers";
 import { answerPointsToNumberedText, splitTags } from "@/lib/import";
 import type { AnswerPoint, Card, CardLearningDetails, CardLearningSummary, CardRelation, CardRelationType, QuestionVariant, Tag as TagItem, TagDisplayLanguage } from "@/lib/types";
@@ -24,6 +24,8 @@ type CardDraft = { question: string; questionVariants: QuestionVariant[]; relati
 type EditorSaveState = "idle" | "saving" | "success";
 type WorkspaceMode = "manual" | "import";
 const defaultKnowledgeBaseTypes = ["Agent", "Java 后端", "计算机基础"];
+const cardsPageSize = 20;
+type CardPage = { cards: Card[]; learning: Record<string, CardLearningSummary>; total: number; catalogTotal: number; hasMore: boolean; facets: { tracks: string[]; tags: string[] } };
 
 function compactReviewTime(value: string | null | undefined, future = false) {
   if (!value) return future ? "待首次作答" : "尚未练习";
@@ -158,6 +160,14 @@ function useCardRecommendationPreload() {
 export function CardLibrary() {
   const [cards, setCards] = useState<Card[]>([]);
   const [learningByCardId, setLearningByCardId] = useState<Record<string, CardLearningSummary>>({});
+  const [relationCards, setRelationCards] = useState<Card[]>([]);
+  const [cardsTotal, setCardsTotal] = useState(0);
+  const [catalogTotal, setCatalogTotal] = useState(0);
+  const [hasMoreCards, setHasMoreCards] = useState(false);
+  const [cardsLoading, setCardsLoading] = useState(true);
+  const [cardsLoadingMore, setCardsLoadingMore] = useState(false);
+  const [catalogTracks, setCatalogTracks] = useState<string[]>([]);
+  const [catalogTags, setCatalogTags] = useState<string[]>([]);
   const [detail, setDetail] = useState<{ card: Card; relatedCards: Array<Card & { relationType: CardRelationType }>; learning: CardLearningDetails } | null>(null);
   const [detailLoading, setDetailLoading] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
@@ -186,6 +196,12 @@ export function CardLibrary() {
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const editorSaveStatusRef = useRef<HTMLDivElement>(null);
   const workspaceSwitchTimer = useRef<number | null>(null);
+  const cardsRequestController = useRef<AbortController | null>(null);
+  const cardsRequestGeneration = useRef(0);
+  const [loadMoreNode, setLoadMoreNode] = useState<HTMLDivElement | null>(null);
+  const [filterBarNode, setFilterBarNode] = useState<HTMLDivElement | null>(null);
+  const [filterBarAboveViewport, setFilterBarAboveViewport] = useState(false);
+  const [returnScrollPosition, setReturnScrollPosition] = useState<number | null>(null);
   const recommendationPreload = useCardRecommendationPreload();
   const editorRecommendationDraft = useMemo<CardRecommendationDraft>(() => ({ question: editingDraft?.question ?? "", questionVariants: editingDraft?.questionVariants ?? [], answerPoints: editingDraft?.answerPoints ?? [], note: editingDraft?.note ?? "", track: editingDraft?.track ?? "", tags: splitTags(editingDraft?.tags ?? "") }), [editingDraft]);
   const preloadedEditorResult = editingCard ? recommendationPreload.recommendations[recommendationCacheKey(editingCard)] : undefined;
@@ -197,18 +213,41 @@ export function CardLibrary() {
   }, [editingCard, preloadedEditorResult]);
   const editorRecommendations = useCardRecommendations(editorRecommendationDraft, editingCard?.id, editingDraft?.relations ?? [], preloadedEditorRecommendations);
 
-  const load = useCallback(() => Promise.all([
-    fetch("/api/cards").then((response) => response.json()),
-    fetch("/api/settings").then((response) => response.json()),
-    fetch("/api/tags").then((response) => response.json()),
-  ]).then(([data, settings, tagData]) => {
-    setCards(data.cards);
-    setLearningByCardId(data.learning ?? {});
+  const loadCardsPage = useCallback(async (offset: number, replace = false) => {
+    if (replace) { cardsRequestGeneration.current += 1; cardsRequestController.current?.abort(); setCardsLoading(true); setReturnScrollPosition(null); }
+    else setCardsLoadingMore(true);
+    const generation = cardsRequestGeneration.current;
+    const controller = new AbortController();
+    cardsRequestController.current = controller;
+    const params = new URLSearchParams({ offset: String(offset), limit: String(cardsPageSize), query, track: selectedTrack, sort, direction: sortDirection, archived: String(showArchived) });
+    for (const tag of selectedTags) params.append("tag", tag);
+    try {
+      const response = await fetch(`/api/cards?${params}`, { signal: controller.signal });
+      const data = await response.json() as CardPage;
+      if (!response.ok) throw new Error("无法读取卡片。");
+      if (generation !== cardsRequestGeneration.current) return;
+      setCards((current) => replace ? data.cards : [...current, ...data.cards.filter((card) => !current.some((existing) => existing.id === card.id))]);
+      setLearningByCardId((current) => replace ? data.learning : { ...current, ...data.learning });
+      setCardsTotal(data.total);
+      setCatalogTotal(data.catalogTotal);
+      setHasMoreCards(data.hasMore);
+      setCatalogTracks(data.facets.tracks);
+      setCatalogTags(data.facets.tags);
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) setNotice(error instanceof Error ? error.message : "无法读取卡片。");
+    } finally {
+      if (generation === cardsRequestGeneration.current) { setCardsLoading(false); setCardsLoadingMore(false); }
+    }
+  }, [query, selectedTrack, selectedTags, showArchived, sort, sortDirection]);
+  const load = useCallback(async () => {
+    const [settings, tagData] = await Promise.all([fetch("/api/settings").then((response) => response.json()), fetch("/api/tags").then((response) => response.json())]);
     setStabilityRarityPreset(rarityPreset(settings.stabilityRarityPreset));
     setTagDisplayLanguage(settings.tagDisplayLanguage === "en" || settings.tagDisplayLanguage === "both" ? settings.tagDisplayLanguage : "zh");
     setTagCatalog(tagData.tags ?? []);
-  }), []);
-  useEffect(() => { load(); }, [load]);
+    await loadCardsPage(0, true);
+  }, [loadCardsPage]);
+  useEffect(() => { void load(); }, [load]);
+  useEffect(() => () => cardsRequestController.current?.abort(), []);
   useEffect(() => () => {
     if (workspaceSwitchTimer.current !== null) window.clearTimeout(workspaceSwitchTimer.current);
   }, []);
@@ -217,6 +256,37 @@ export function CardLibrary() {
       setWorkspaceMode("manual");
       setWorkspaceOpen(true);
     }
+  }, []);
+  useEffect(() => {
+    if (!loadMoreNode || !hasMoreCards || cardsLoading || cardsLoadingMore) return;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry?.isIntersecting) void loadCardsPage(cards.length);
+    }, { rootMargin: "0px 0px 480px 0px" });
+    observer.observe(loadMoreNode);
+    return () => observer.disconnect();
+  }, [cards.length, cardsLoading, cardsLoadingMore, hasMoreCards, loadCardsPage, loadMoreNode]);
+  useEffect(() => {
+    if (!filterBarNode) return;
+    const observer = new IntersectionObserver(([entry]) => {
+      setFilterBarAboveViewport(!entry.isIntersecting && entry.boundingClientRect.bottom < 0);
+    }, { threshold: 0 });
+    observer.observe(filterBarNode);
+    return () => observer.disconnect();
+  }, [filterBarNode]);
+  useEffect(() => {
+    const clearSavedPosition = () => setReturnScrollPosition(null);
+    const clearOnKeyboardScroll = (event: KeyboardEvent) => {
+      if (event.target instanceof Element && event.target.closest(".library-scroll-toggle")) return;
+      if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) clearSavedPosition();
+    };
+    window.addEventListener("wheel", clearSavedPosition, { passive: true });
+    window.addEventListener("touchstart", clearSavedPosition, { passive: true });
+    window.addEventListener("keydown", clearOnKeyboardScroll);
+    return () => {
+      window.removeEventListener("wheel", clearSavedPosition);
+      window.removeEventListener("touchstart", clearSavedPosition);
+      window.removeEventListener("keydown", clearOnKeyboardScroll);
+    };
   }, []);
   useEffect(() => {
     const closeWhenFocusLeaves = (event: FocusEvent | PointerEvent) => {
@@ -236,11 +306,10 @@ export function CardLibrary() {
       document.removeEventListener("click", closeAfterDownload);
     };
   }, []);
-  const savedKnowledgeBaseTypes = useMemo(() => [...new Set(cards.map((card) => card.track))].sort((left, right) => left.localeCompare(right, "zh-CN")), [cards]);
+  const savedKnowledgeBaseTypes = useMemo(() => catalogTracks, [catalogTracks]);
   const knowledgeBaseTypeSuggestions = useMemo(() => [...new Set([...defaultKnowledgeBaseTypes, ...savedKnowledgeBaseTypes])].sort((left, right) => left.localeCompare(right, "zh-CN")), [savedKnowledgeBaseTypes]);
-  const tags = useMemo(() => [...new Set(cards.flatMap((card) => card.tags))].sort((left, right) => left.localeCompare(right, "zh-CN")), [cards]);
+  const tags = useMemo(() => catalogTags, [catalogTags]);
   const tagLabel = useCallback((key: string) => { const tag = tagCatalog.find((item) => item.key === key.toLocaleLowerCase()); return tag ? formatTag(tag, tagDisplayLanguage) : key; }, [tagCatalog, tagDisplayLanguage]);
-  const visibleCards = useMemo(() => filterAndSortCards(cards.filter((card) => showArchived ? card.status === "archived" : card.status !== "archived"), learningByCardId, { query, track: selectedTrack, tags: selectedTags, sort, direction: sortDirection }), [cards, learningByCardId, query, selectedTrack, selectedTags, sort, sortDirection, showArchived]);
   const changeSort = (next: CardSort) => { setSort(next); setSortDirection(next === "review" || next === "difficulty" ? "asc" : "desc"); };
   const clearFilters = () => { setQuery(""); setSelectedTrack(""); setSelectedTags(new Set()); setSort("created"); setSortDirection("desc"); setShowArchived(false); };
   const cancelWorkspaceSwitch = () => {
@@ -318,6 +387,10 @@ export function CardLibrary() {
     setEditorSaveState("idle");
     setEditorSaveError("");
     setNotice("");
+    void fetch("/api/cards/options").then(async (response) => {
+      if (!response.ok) throw new Error("无法读取关联卡片。");
+      return response.json() as Promise<{ cards: Card[] }>;
+    }).then((data) => setRelationCards(data.cards)).catch(() => setRelationCards(cards));
   };
   const generateVariants = async (question: string, answerPoints: AnswerPoint[], existing: QuestionVariant[]) => {
     if (question.trim().length < 3 || !answerPoints.some((item) => item.content.trim())) { setNotice("请先填写主问题和至少一条答案要点，再让 AI 补充问法。"); return; }
@@ -343,6 +416,7 @@ export function CardLibrary() {
       // instead of making its visibility depend on a second, unrelated GET request.
       recommendationPreload.clear();
       setCards((current) => current.map((card) => card.id === data.card.id ? data.card : card));
+      await load();
       saved = true;
       setEditorSaveState("success");
     } catch (error) {
@@ -374,6 +448,17 @@ export function CardLibrary() {
     const blob = new Blob([content], { type: format === "json" ? "application/json" : "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = `mock-interview-cards.${format}`; link.click(); URL.revokeObjectURL(url);
   };
+  const navigateLibraryScroll = () => {
+    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+    if (returnScrollPosition !== null) {
+      const target = returnScrollPosition;
+      setReturnScrollPosition(null);
+      window.scrollTo({ top: target, behavior });
+      return;
+    }
+    setReturnScrollPosition(window.scrollY);
+    window.scrollTo({ top: 0, behavior });
+  };
 
   return <PageLayout className="cards-library-page">{detail && <CardDetailsDialog card={detail.card} relatedCards={detail.relatedCards} learning={detail.learning} onClose={() => setDetail(null)} />}{rarityPreviewOpen && <RarityPreviewDialog preset={stabilityRarityPreset} onClose={() => setRarityPreviewOpen(false)} />}{knowledgeExamplesOpen && <KnowledgeBaseExamplesDialog preset={stabilityRarityPreset} onClose={() => setKnowledgeExamplesOpen(false)} />}{tagManagerOpen && <TagManagerDialog tags={tagCatalog} language={tagDisplayLanguage} onClose={() => setTagManagerOpen(false)} onChange={load} />}<LLMConfigurationDialog open={needsLLMConfiguration} onClose={() => setNeedsLLMConfiguration(false)} purpose="AI 补充问法" />
     <PageHeader eyebrow={<><LibraryBig size={15}/> 卡片库</>} title="把积累的知识，随时翻出来练。" description="筛选、编辑或查看学习轨迹，让每一张卡片保持可用。" tour="library" actionRows={<div className="library-header-actions"><div className="library-header-action-row"><Button type="button" variant="secondary" onClick={() => setTagManagerOpen(true)}><Tags size={17}/> 标签管理</Button><Button type="button" variant="secondary" onClick={() => setKnowledgeExamplesOpen(true)}><LayoutGrid size={17}/> 知识库示例</Button><TourButton tour="library" iconOnly /></div><div className="library-header-action-row"><Button type="button" onClick={() => openWorkspace("manual")} data-tour="library-create-card"><FilePlus2 size={17}/> 创建卡片</Button><div className="cards-import-actions"><Button type="button" variant="secondary" onClick={() => openWorkspace("import")}><FileSpreadsheet size={17}/> 导入卡片</Button><details className="template-download"><summary>下载模板文件</summary><div className="template-download-options"><p>CSV 模板中，其他问法、答案要点和回忆提示均可在同一单元格内换行；答案与提示会按行配对。</p><a href="/cards-import-template.md" download>Markdown 模板</a><a href="/cards-import-template.csv" download>CSV 模板（完整字段）</a></div></details></div></div></div>} />
@@ -383,12 +468,12 @@ export function CardLibrary() {
       <div className="card-editor-content" inert={editorSaveState !== "idle"} aria-hidden={editorSaveState !== "idle"}>
         <div className="card-editor-heading"><div><p className="eyebrow"><PencilLine size={15}/> 编辑卡片</p><h2 id="card-editor-title">{editingDraft.question.trim() || "未命名问题"}</h2><p>修改内容不会重置已有的复习进度。</p></div><button className="icon-close" type="button" onClick={closeEditor} disabled={editBusy} aria-label="关闭编辑卡片"><X size={19}/></button></div>
         {editorSaveError && <div className="card-editor-save-error" role="alert">{editorSaveError}</div>}
-        <form className="card-editor-form" onSubmit={saveCardEditor}><QuestionWordingsEditor question={editingDraft.question} variants={editingDraft.questionVariants} candidates={aiCandidates} onChange={({ question, variants }) => setEditingDraft((draft) => draft ? { ...draft, question, questionVariants: variants } : draft)} onCandidatesChange={setAiCandidates} onGenerate={() => generateVariants(editingDraft.question, editingDraft.answerPoints, editingDraft.questionVariants)} busy={aiBusy}/><AnswerPointsEditor points={editingDraft.answerPoints} onChange={(answerPoints) => setEditingDraft({ ...editingDraft, answerPoints })} /> <RelatedCardsEditor cards={cards} value={editingDraft.relations} onChange={(relations) => setEditingDraft({ ...editingDraft, relations })} excludeId={editingCard.id} recommendations={editorRecommendations.relatedCards} recommendationState={editorRecommendations.state}/><label className="field card-note-field">学习备注<textarea rows={4} value={editingDraft.note} onChange={(event) => setEditingDraft({ ...editingDraft, note: event.target.value })} placeholder="记录来源、待核实的信息，或下一次复习时想提醒自己的事。" /></label><div className="form-grid two"><label className="field">知识库类型<SearchableSelect value={editingDraft.track} onChange={(track) => setEditingDraft({ ...editingDraft, track })} options={knowledgeBaseTypeSuggestions} placeholder="选择或输入新类型" ariaLabel="知识库类型" allowCustom required /></label><div className="tag-field-with-recommendations"><div className="field"><span>标签</span><SearchableSelect multiple value={splitTags(editingDraft.tags)} onChange={(values) => setEditingDraft((draft) => draft ? { ...draft, tags: values.join(", ") } : draft)} options={tags} placeholder="选择或输入标签" ariaLabel="标签" allowCustom menuPlacement="top" menuHeader={<TagRecommendations tags={editorRecommendations.tags} state={editorRecommendations.state} onAdd={(tag) => setEditingDraft((draft) => draft ? { ...draft, tags: splitTags([...splitTags(draft.tags), tag].join(", ")).join(", ") } : draft)}/>} /></div></div></div><div className="form-actions card-editor-actions"><Button type="button" variant="ghost" onClick={closeEditor} disabled={editBusy}>取消</Button><Button type="submit" disabled={editBusy}>{editBusy ? "正在保存…" : <><CheckCircle2 size={17}/> 保存修改</>}</Button></div></form>
+        <form className="card-editor-form" onSubmit={saveCardEditor}><QuestionWordingsEditor question={editingDraft.question} variants={editingDraft.questionVariants} candidates={aiCandidates} onChange={({ question, variants }) => setEditingDraft((draft) => draft ? { ...draft, question, questionVariants: variants } : draft)} onCandidatesChange={setAiCandidates} onGenerate={() => generateVariants(editingDraft.question, editingDraft.answerPoints, editingDraft.questionVariants)} busy={aiBusy}/><AnswerPointsEditor points={editingDraft.answerPoints} onChange={(answerPoints) => setEditingDraft({ ...editingDraft, answerPoints })} /> <RelatedCardsEditor cards={relationCards.length ? relationCards : cards} value={editingDraft.relations} onChange={(relations) => setEditingDraft({ ...editingDraft, relations })} excludeId={editingCard.id} recommendations={editorRecommendations.relatedCards} recommendationState={editorRecommendations.state}/><label className="field card-note-field">学习备注<textarea rows={4} value={editingDraft.note} onChange={(event) => setEditingDraft({ ...editingDraft, note: event.target.value })} placeholder="记录来源、待核实的信息，或下一次复习时想提醒自己的事。" /></label><div className="form-grid two"><label className="field">知识库类型<SearchableSelect value={editingDraft.track} onChange={(track) => setEditingDraft({ ...editingDraft, track })} options={knowledgeBaseTypeSuggestions} placeholder="选择或输入新类型" ariaLabel="知识库类型" allowCustom required /></label><div className="tag-field-with-recommendations"><div className="field"><span>标签</span><SearchableSelect multiple value={splitTags(editingDraft.tags)} onChange={(values) => setEditingDraft((draft) => draft ? { ...draft, tags: values.join(", ") } : draft)} options={tags} placeholder="选择或输入标签" ariaLabel="标签" allowCustom menuPlacement="top" menuHeader={<TagRecommendations tags={editorRecommendations.tags} state={editorRecommendations.state} onAdd={(tag) => setEditingDraft((draft) => draft ? { ...draft, tags: splitTags([...splitTags(draft.tags), tag].join(", ")).join(", ") } : draft)}/>} /></div></div></div><div className="form-actions card-editor-actions"><Button type="button" variant="ghost" onClick={closeEditor} disabled={editBusy}>取消</Button><Button type="submit" disabled={editBusy}>{editBusy ? "正在保存…" : <><CheckCircle2 size={17}/> 保存修改</>}</Button></div></form>
       </div>
       {editorSaveState !== "idle" && <div ref={editorSaveStatusRef} className={`card-editor-save-overlay ${editorSaveState}`} role="status" aria-live="polite" aria-atomic="true" tabIndex={-1}>{editorSaveState === "saving" ? <div className="card-editor-save-pending"><span className="card-editor-save-spinner" aria-hidden="true"/><strong>正在保存…</strong><p>正在更新这张卡片</p></div> : <div className="card-editor-save-success" onAnimationEnd={(event) => { if (event.target === event.currentTarget) completeCardSave(); }}><span aria-hidden="true"><CheckCircle2 size={46} strokeWidth={3}/></span><strong>保存成功</strong><p>卡片已更新</p></div>}</div>}
     </section></div>}
-    <section className="cards-library"><div className="section-title"><h2>已沉淀的卡片</h2><span>{visibleCards.length} / {cards.length} 张</span></div>
-      {cards.length > 0 && <><div className="cards-filter-bar" data-tour="library-filters" aria-label="卡片筛选与排序">
+    <section className="cards-library"><div className="section-title"><h2>已沉淀的卡片</h2><span>{cards.length} / {cardsTotal} 张</span></div>
+      {catalogTotal > 0 && <><div ref={setFilterBarNode} className="cards-filter-bar" data-tour="library-filters" aria-label="卡片筛选与排序">
         <div className="cards-filter-row cards-filter-row-primary">
           <label className="card-search"><Search size={17}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索问题、答案、标签或备注" aria-label="搜索卡片" /></label>
           <SearchableSelect variant="filter" value={selectedTrack} onChange={setSelectedTrack} options={savedKnowledgeBaseTypes} placeholder="知识库类型" ariaLabel="筛选知识库类型" emptyText="暂无可选类型" />
@@ -401,7 +486,7 @@ export function CardLibrary() {
           <button type="button" className="clear-card-filters" onClick={clearFilters}>清除筛选</button>
         </div>
       </div><div data-tour="library-selection">{selectedIds.size > 0 && <div className="bulk-card-toolbar" role="status"><strong>已选择 {selectedIds.size} 张</strong>{showArchived ? <Button variant="secondary" onClick={() => bulk("restore")}><Undo2 size={16}/> 恢复</Button> : <Button variant="secondary" onClick={() => bulk("archive")}><Archive size={16}/> 归档</Button>}<Button variant="ghost" onClick={() => { const value = window.prompt("添加标签（用逗号分隔）"); if (value) void bulk("addTags", splitTags(value)); }}><Tag size={16}/> 添加标签</Button><Button variant="ghost" onClick={() => { const value = window.prompt("移动到知识库类型"); if (value) void bulk("move", value); }}>移动类型</Button><Button variant="ghost" onClick={() => exportSelected("csv")}><Download size={16}/> CSV</Button><Button variant="ghost" onClick={() => exportSelected("json")}><Download size={16}/> JSON</Button><Button variant="danger" onClick={() => bulk("delete")}><Trash2 size={16}/> 永久删除</Button><button type="button" className="clear-card-filters" onClick={() => setSelectedIds(new Set())}>取消选择</button></div>}</div></>}
-      {cards.length ? visibleCards.length ? <div className="card-grid">{visibleCards.map((card) => {
+      {cardsLoading ? <div className="cards-loading" role="status">正在加载卡片…</div> : cardsTotal ? cards.length ? <><div className="card-grid">{cards.map((card) => {
         const learning = learningByCardId[card.id];
         const difficulty = difficultyTier(learning?.fsrsDifficulty);
         const rarity = stabilityRarityTier(learning?.fsrsStability, stabilityRarityPreset);
@@ -444,7 +529,7 @@ export function CardLibrary() {
             <div className="card-meta"><Chip tone="blue">类型：{card.track}</Chip>{card.tags.map((tag) => <Chip key={tag} tone="ink">#{tagLabel(tag)}</Chip>)}</div>
           </div>
         </KnowledgeCardFrame>;
-      })}</div> : <EmptyState title="没有符合条件的卡片" detail="换个关键词，或清除筛选条件再试试。" /> : <EmptyState title="你的题库还没有内容" detail="从一个你曾经答得不够顺的问题开始记录。" action={<Button type="button" onClick={() => openWorkspace("manual")}>创建第一张卡片</Button>} />}
-    </section>
+      })}</div><div ref={setLoadMoreNode} className="cards-load-more" aria-live="polite">{cardsLoadingMore ? "正在加载更多卡片…" : hasMoreCards ? "继续向下滚动以加载更多" : "已显示全部卡片"}</div></> : <EmptyState title="没有符合条件的卡片" detail="换个关键词，或清除筛选条件再试试。" /> : <EmptyState title="你的题库还没有内容" detail="从一个你曾经答得不够顺的问题开始记录。" action={<Button type="button" onClick={() => openWorkspace("manual")}>创建第一张卡片</Button>} />}
+    </section>{(filterBarAboveViewport || returnScrollPosition !== null) && <button type="button" className="library-scroll-toggle" onClick={navigateLibraryScroll} aria-label={returnScrollPosition === null ? "回到卡片库顶部" : "回到刚才浏览的位置"} title={returnScrollPosition === null ? "回到顶部" : "回到刚才的位置"}>{returnScrollPosition === null ? <ArrowUp size={21}/> : <ArrowDown size={21}/>}</button>}
   </PageLayout>;
 }
