@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { BookOpen, Check, ClipboardList, Flame, Mic2, RefreshCw, Target } from "lucide-react";
+import { AlertCircle, BookOpen, Check, ClipboardList, Flame, Mic2, RefreshCw, Target } from "lucide-react";
 import { HomeTutorialDialog } from "@/components/home-tutorial-dialog";
 import { TrainingCalendar } from "@/components/training-calendar";
 import { Button, Panel } from "@/components/ui";
@@ -68,10 +68,30 @@ function TutorialLauncher({ onLaunch }: { onLaunch: () => void }) {
 
 export default function TodayPage() {
   const [data, setData] = useState<DashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [tutorialOpen, setTutorialOpen] = useState(false);
-  const load = useCallback(() => fetch("/api/dashboard").then((response) => response.json()).then(setData), []);
+  const load = useCallback(async () => {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 15_000);
+    setLoading(true);
+    setLoadError("");
+    try {
+      const response = await fetch("/api/dashboard", { cache: "no-store", signal: controller.signal });
+      const result = await response.json() as Partial<DashboardData> & { error?: string };
+      if (!response.ok) throw new Error(result.error ?? `读取今日计划失败（HTTP ${response.status}）。`);
+      if (!Array.isArray(result.tasks) || !result.totals) throw new Error("今日计划返回的数据不完整。");
+      setData(result as DashboardData);
+    } catch (error) {
+      setLoadError(error instanceof DOMException && error.name === "AbortError" ? "读取今日计划超时，请检查本地服务后重试。" : error instanceof Error ? error.message : "读取今日计划失败，请重试。");
+    } finally {
+      window.clearTimeout(timeout);
+      setLoading(false);
+    }
+  }, []);
   useEffect(() => { load(); }, [load]);
-  if (!data) return <div className="loading">正在铺开今天的学习路径…</div>;
+  if (loading) return <div className="loading">正在铺开今天的学习路径…</div>;
+  if (!data) return <Panel className="load-error" role="alert"><AlertCircle size={22}/><div><h2>今日页暂时无法加载</h2><p>{loadError || "请稍后重试。"}</p></div><Button type="button" variant="secondary" onClick={() => void load()}><RefreshCw size={17}/> 重试</Button></Panel>;
   const goals = ([
     { kind: "learn", queue: "initial", label: "今日需学习", idle: "先录入一张卡片，今天的学习目标会自动出现。", action: "开始学习" },
     { kind: "review", queue: "review", label: "今日需复习", idle: "今天没有到期复习，完成学习后会自动进入后续安排。", action: "开始复习" },
