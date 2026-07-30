@@ -116,7 +116,7 @@ export default function ReviewPage() {
 
   useEffect(() => {
     const { queue, cardId } = taskTarget;
-    if ((queue === "initial" || queue === "review" || queue === "weak") && cardId) void loadSession(queue, [], cardId);
+    if (queue === "initial" || queue === "review" || queue === "weak") void loadSession(queue, [], cardId);
   }, [loadSession, taskTarget]);
 
   useEffect(() => {
