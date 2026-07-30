@@ -20,6 +20,7 @@ import type { AnswerPoint, Card, CardLearningDetails, CardLearningSummary, CardR
 
 type CardDraft = { question: string; questionVariants: QuestionVariant[]; relations: CardRelation[]; answerPoints: AnswerPoint[]; note: string; track: string; tags: string; source: string };
 type EditorSaveState = "idle" | "saving" | "success";
+type WorkspaceMode = "manual" | "import";
 const defaultKnowledgeBaseTypes = ["Agent", "Java 后端", "计算机基础"];
 
 function compactReviewTime(value: string | null | undefined, future = false) {
@@ -176,8 +177,10 @@ export function CardLibrary() {
   const [stabilityRarityPreset, setStabilityRarityPreset] = useState<StabilityRarityPreset>("memory-cycle");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showArchived, setShowArchived] = useState(false);
-  const [workspaceMode, setWorkspaceMode] = useState<"manual" | "import" | null>(null);
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode | null>(null);
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const editorSaveStatusRef = useRef<HTMLDivElement>(null);
+  const workspaceSwitchTimer = useRef<number | null>(null);
   const recommendationPreload = useCardRecommendationPreload();
   const editorRecommendationDraft = useMemo<CardRecommendationDraft>(() => ({ question: editingDraft?.question ?? "", questionVariants: editingDraft?.questionVariants ?? [], answerPoints: editingDraft?.answerPoints ?? [], note: editingDraft?.note ?? "", track: editingDraft?.track ?? "", tags: splitTags(editingDraft?.tags ?? "") }), [editingDraft]);
   const preloadedEditorResult = editingCard ? recommendationPreload.recommendations[recommendationCacheKey(editingCard)] : undefined;
@@ -198,8 +201,14 @@ export function CardLibrary() {
     setStabilityRarityPreset(rarityPreset(settings.stabilityRarityPreset));
   }), []);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => () => {
+    if (workspaceSwitchTimer.current !== null) window.clearTimeout(workspaceSwitchTimer.current);
+  }, []);
   useEffect(() => {
-    if (window.localStorage.getItem("mock-interview:supplement-draft") || window.localStorage.getItem("mock-interview:follow-up-card-draft")) setWorkspaceMode("manual");
+    if (window.localStorage.getItem("mock-interview:supplement-draft") || window.localStorage.getItem("mock-interview:follow-up-card-draft")) {
+      setWorkspaceMode("manual");
+      setWorkspaceOpen(true);
+    }
   }, []);
   useEffect(() => {
     const closeWhenFocusLeaves = (event: FocusEvent | PointerEvent) => {
@@ -225,14 +234,49 @@ export function CardLibrary() {
   const visibleCards = useMemo(() => filterAndSortCards(cards.filter((card) => showArchived ? card.status === "archived" : card.status !== "archived"), learningByCardId, { query, track: selectedTrack, tags: selectedTags, sort, direction: sortDirection }), [cards, learningByCardId, query, selectedTrack, selectedTags, sort, sortDirection, showArchived]);
   const changeSort = (next: CardSort) => { setSort(next); setSortDirection(next === "review" || next === "difficulty" ? "asc" : "desc"); };
   const clearFilters = () => { setQuery(""); setSelectedTrack(""); setSelectedTags(new Set()); setSort("created"); setSortDirection("desc"); setShowArchived(false); };
-  const openWorkspace = (mode: "manual" | "import") => {
-    setNotice("");
-    setWorkspaceMode(mode);
+  const cancelWorkspaceSwitch = () => {
+    if (workspaceSwitchTimer.current === null) return;
+    window.clearTimeout(workspaceSwitchTimer.current);
+    workspaceSwitchTimer.current = null;
   };
-  const completeWorkspace = (message: string) => {
-    setWorkspaceMode(null);
+  const closeWorkspace = () => {
+    cancelWorkspaceSwitch();
+    if (!workspaceMode) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setWorkspaceMode(null);
+      setWorkspaceOpen(false);
+      return;
+    }
+    setWorkspaceOpen(false);
+    workspaceSwitchTimer.current = window.setTimeout(() => {
+      workspaceSwitchTimer.current = null;
+      setWorkspaceMode(null);
+    }, 300);
+  };
+  const openWorkspace = (mode: WorkspaceMode) => {
+    setNotice("");
+    if (workspaceMode === mode && workspaceOpen) return;
+    cancelWorkspaceSwitch();
+    if (!workspaceMode || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setWorkspaceMode(mode);
+      setWorkspaceOpen(true);
+      return;
+    }
+    setWorkspaceOpen(false);
+    workspaceSwitchTimer.current = window.setTimeout(() => {
+      workspaceSwitchTimer.current = null;
+      setWorkspaceMode(mode);
+      setWorkspaceOpen(true);
+    }, 300);
+  };
+  const completeWorkspace = (message: string, mode: WorkspaceMode) => {
+    if (mode === "import") closeWorkspace();
     setNotice(message);
     void load();
+    if (mode === "manual") {
+      const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+      window.scrollTo({ top: 0, behavior });
+    }
   };
   const completeCardSave = useCallback(() => {
     setEditingCard(null); setEditingDraft(null); setAiCandidates([]); setEditorSaveError(""); setEditorSaveState("idle"); setEditBusy(false);
@@ -325,7 +369,7 @@ export function CardLibrary() {
   return <PageLayout className="cards-library-page">{detail && <CardDetailsDialog card={detail.card} relatedCards={detail.relatedCards} learning={detail.learning} onClose={() => setDetail(null)} />}{rarityPreviewOpen && <RarityPreviewDialog preset={stabilityRarityPreset} onClose={() => setRarityPreviewOpen(false)} />}{knowledgeExamplesOpen && <KnowledgeBaseExamplesDialog preset={stabilityRarityPreset} onClose={() => setKnowledgeExamplesOpen(false)} />}<LLMConfigurationDialog open={needsLLMConfiguration} onClose={() => setNeedsLLMConfiguration(false)} purpose="AI 补充问法" />
     <PageHeader eyebrow={<><LibraryBig size={15}/> 卡片库</>} title="把积累的知识，随时翻出来练。" description="筛选、编辑或查看学习轨迹，让每一张卡片保持可用。" tour="library" actionRows={<div className="library-header-actions"><div className="library-header-action-row"><Button type="button" variant="secondary" onClick={() => setKnowledgeExamplesOpen(true)}><LayoutGrid size={17}/> 知识库示例</Button><TourButton tour="library" iconOnly /></div><div className="library-header-action-row"><Button type="button" onClick={() => openWorkspace("manual")} data-tour="library-create-card"><FilePlus2 size={17}/> 创建卡片</Button><div className="cards-import-actions"><Button type="button" variant="secondary" onClick={() => openWorkspace("import")}><FileSpreadsheet size={17}/> 导入卡片</Button><details className="template-download"><summary>下载模板文件</summary><div className="template-download-options"><p>CSV 模板中，其他问法、答案要点和回忆提示均可在同一单元格内换行；答案与提示会按行配对。</p><a href="/cards-import-template.md" download>Markdown 模板</a><a href="/cards-import-template.csv" download>CSV 模板（完整字段）</a></div></details></div></div></div>} />
     {notice && <div className="notice" role="status" style={{ marginBottom: 20 }}>{notice}</div>}
-    <div className={`library-workspace ${workspaceMode ? "open" : ""}`} aria-hidden={!workspaceMode}><div className="library-workspace-inner">{workspaceMode && <CardWorkspace key={workspaceMode} initialMode={workspaceMode} onClose={() => setWorkspaceMode(null)} onComplete={completeWorkspace} />}</div></div>
+    <div className={`library-workspace ${workspaceOpen ? "open" : ""}`} aria-hidden={!workspaceOpen}><div className="library-workspace-inner">{workspaceMode && <CardWorkspace key={workspaceMode} initialMode={workspaceMode} onClose={closeWorkspace} onComplete={completeWorkspace} />}</div></div>
     {editingCard && editingDraft && <div className="card-editor-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeEditor(); }}><section className="card-editor-modal" role="dialog" aria-modal="true" aria-labelledby="card-editor-title" aria-busy={editorSaveState !== "idle"}>
       <div className="card-editor-content" inert={editorSaveState !== "idle"} aria-hidden={editorSaveState !== "idle"}>
         <div className="card-editor-heading"><div><p className="eyebrow"><PencilLine size={15}/> 编辑卡片</p><h2 id="card-editor-title">{editingDraft.question.trim() || "未命名问题"}</h2><p>修改内容不会重置已有的复习进度。</p></div><button className="icon-close" type="button" onClick={closeEditor} disabled={editBusy} aria-label="关闭编辑卡片"><X size={19}/></button></div>
