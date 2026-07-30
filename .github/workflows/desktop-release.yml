@@ -32,13 +32,20 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - if: ${{ secrets.MACOS_CERTIFICATE == '' }}
-        run: npm run desktop:dist -- --mac --arm64
-      - if: ${{ secrets.MACOS_CERTIFICATE != '' }}
-        run: npm run desktop:dist -- --mac --arm64
+      - name: Build macOS application
+        shell: bash
+        run: |
+          if [ -n "$MACOS_CERTIFICATE" ]; then
+            export CSC_LINK="$MACOS_CERTIFICATE"
+            export CSC_KEY_PASSWORD="$MACOS_CERTIFICATE_PASSWORD"
+            export APPLE_ID
+            export APPLE_APP_SPECIFIC_PASSWORD
+            export APPLE_TEAM_ID
+          fi
+          npm run desktop:dist -- --mac --arm64
         env:
-          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE }}
-          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -57,13 +64,17 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - if: ${{ secrets.WINDOWS_CERTIFICATE == '' }}
-        run: npm run desktop:dist -- --win --x64
-      - if: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
-        run: npm run desktop:dist -- --win --x64
+      - name: Build Windows application
+        shell: bash
+        run: |
+          if [ -n "$WINDOWS_CERTIFICATE" ]; then
+            export CSC_LINK="$WINDOWS_CERTIFICATE"
+            export CSC_KEY_PASSWORD="$WINDOWS_CERTIFICATE_PASSWORD"
+          fi
+          npm run desktop:dist -- --win --x64
         env:
-          CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE }}
-          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
       - uses: actions/upload-artifact@v4
         with:
           name: windows-release
