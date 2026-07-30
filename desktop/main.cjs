@@ -1,6 +1,5 @@
-const { app, BrowserWindow, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain, utilityProcess } = require("electron");
 const { autoUpdater } = require("electron-updater");
-const { spawn } = require("node:child_process");
 const { existsSync, readFileSync, writeFileSync } = require("node:fs");
 const http = require("node:http");
 const net = require("node:net");
@@ -58,12 +57,12 @@ async function startServer() {
     ? path.join(process.resourcesPath, "next", "server.js")
     : path.join(app.getAppPath(), ".next", "standalone", "server.js");
   if (!existsSync(serverPath)) throw new Error("未找到应用服务。请先执行 npm run desktop:build。");
-  serverProcess = spawn(process.execPath, [serverPath], {
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", PORT: String(serverPort), HOSTNAME: "127.0.0.1", MOCK_INTERVIEW_HOME: userHome(), NODE_ENV: "production" },
-    stdio: "pipe",
-    windowsHide: true,
+  serverProcess = utilityProcess.fork(serverPath, [], {
+    env: { ...process.env, PORT: String(serverPort), HOSTNAME: "127.0.0.1", MOCK_INTERVIEW_HOME: userHome(), NODE_ENV: "production" },
+    stdio: ["ignore", "ignore", "pipe"],
+    serviceName: "Study Desk Server",
   });
-  serverProcess.stderr.on("data", (message) => console.error(`[next] ${message}`));
+  serverProcess.stderr?.on("data", (message) => console.error(`[next] ${message}`));
   serverProcess.once("exit", (code) => { if (code && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("desktop:server-error", "本地服务意外退出。"); });
   await waitForServer(serverPort);
 }
@@ -117,7 +116,17 @@ ipcMain.handle("updater:defer", () => { if (availableUpdate) { updateSettings.de
 ipcMain.handle("updater:ignore", () => { if (availableUpdate) { updateSettings.ignoredVersion = availableUpdate.version; updateSettings.deferredVersion = undefined; saveUpdateSettings(); sendUpdate({ state: "ignored", version: availableUpdate.version }); } });
 ipcMain.handle("updater:install", () => { if (downloadedUpdate) autoUpdater.quitAndInstall(); });
 
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) app.quit();
+
+app.on("second-instance", () => {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.focus();
+});
+
 app.whenReady().then(async () => {
+  if (!gotSingleInstanceLock) return;
   loadUpdateSettings();
   try { await startServer(); createWindow(); configureUpdater(); }
   catch (error) { console.error(error); app.quit(); }
