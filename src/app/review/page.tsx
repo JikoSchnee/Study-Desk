@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import { ArrowRight, BookOpenCheck, BrainCircuit, CheckCircle2, ChevronLeft, ChevronRight, Dices, Eye, GraduationCap, Lightbulb, RefreshCw, Sparkles, Target } from "lucide-react";
 import { Button, Chip, EmptyState } from "@/components/ui";
 import { PageHeader, PageLayout } from "@/components/page-layout";
-import { useTour } from "@/components/tour";
 import { SpeechRecorder } from "@/components/speech-recorder";
 import { AnswerComparisonView } from "@/components/answer-comparison";
 import { ComparisonModeControl } from "@/components/comparison-mode-control";
@@ -33,7 +32,6 @@ function progressText(stats: { pending: number; completedToday: number }) {
 }
 
 export default function ReviewPage() {
-  const { activeId, completeCheckpoint, registerTourAction, tutorialCardId } = useTour();
   const router = useRouter();
   const [taskTarget] = useState(() => {
     if (typeof window === "undefined") return { queue: null as string | null, cardId: null as string | null };
@@ -190,12 +188,12 @@ export default function ReviewPage() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "暂时无法生成追问卡草稿。");
       window.localStorage.setItem("mock-interview:follow-up-card-draft", JSON.stringify(data.draft));
-      router.push("/cards");
+      router.push("/library");
     } catch (error) { setFeedbackNotice(error instanceof Error ? error.message : "暂时无法生成追问卡草稿。"); }
     finally { setFollowUpDraftBusy(false); }
   };
 
-  const startQueue = useCallback((kind: QueueKind) => { if (kind === "initial") { completeCheckpoint("review-started"); void loadSession(kind, [], activeId === "onboarding" ? tutorialCardId : undefined); return; } void loadSession(kind); }, [activeId, completeCheckpoint, loadSession, tutorialCardId]);
+  const startQueue = useCallback((kind: QueueKind) => { void loadSession(kind); }, [loadSession]);
   const loadRandom = useCallback(() => void loadSession("random", seenRandomIds), [loadSession, seenRandomIds]);
   const leaveSession = useCallback(() => { setSession(null); setCard(null); setEvaluation(null); void loadQueueProgress(); }, [loadQueueProgress]);
 
@@ -207,25 +205,24 @@ export default function ReviewPage() {
       const response = await fetch("/api/review/study", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cardId: card.id }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "无法完成首次学习。");
-      completeCheckpoint("initial-study-completed");
       await loadSession("initial");
     } catch (error) {
       const message = error instanceof Error ? error.message : "无法完成首次学习。";
       setStudyError(message);
       return message;
     } finally { setStudyBusy(false); }
-  }, [card, completeCheckpoint, loadSession, revealedStudyPoints.length, session, spokenBack]);
+  }, [card, loadSession, revealedStudyPoints.length, session, spokenBack]);
 
   const evaluate = useCallback(async (): Promise<string | void> => {
     if (!card || !answer.trim()) return "请先写一段自己的回答，下一步会用同一个提交操作生成报告。";
     setBusy(true); setSubmitError("");
     try {
       const result = await semanticProgress.request<{ evaluation?: Evaluation }>("/api/review/submit", { action: "evaluate", cardId: card.id, presentedQuestion, answer, comparisonMode }, comparisonMode === "embedding");
-      if (result.evaluation) { setEvaluation(result.evaluation); completeCheckpoint("answer-evaluated"); }
+      if (result.evaluation) setEvaluation(result.evaluation);
       else { const message = "未收到评估结果，请重试。"; setSubmitError(message); return message; }
     } catch { const message = "提交失败，答案已保留。请检查网络后重试。"; setSubmitError(message); return message; }
     finally { setBusy(false); }
-  }, [answer, card, comparisonMode, completeCheckpoint, presentedQuestion, semanticProgress]);
+  }, [answer, card, comparisonMode, presentedQuestion, semanticProgress]);
 
   const confirm = useCallback(async (rating: RatingName): Promise<string | void> => {
     if (!card || !session || session === "random") return "当前题目无法确认评级。";
@@ -243,23 +240,6 @@ export default function ReviewPage() {
     } catch { return "评级提交失败，请检查网络后重试。"; }
     finally { setBusy(false); }
   }, [actOnFeedback, answer, card, comparisonMode, loadSession, presentedQuestion, semanticProgress, session]);
-
-  useEffect(() => {
-    if (activeId !== "onboarding" || session !== null) return;
-    return registerTourAction("review-started", () => { startQueue("initial"); });
-  }, [activeId, registerTourAction, session, startQueue]);
-  useEffect(() => {
-    if (activeId !== "onboarding" || session !== "initial" || !card) return;
-    return registerTourAction("initial-study-completed", async () => {
-      setRevealedStudyPoints(card.answerPoints.map((_, index) => index));
-      setSpokenBack(true);
-      const response = await fetch("/api/review/study", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cardId: card.id }) });
-      const data = await response.json();
-      if (!response.ok) return data.error ?? "无法完成首次学习。";
-      completeCheckpoint("initial-study-completed");
-      await loadSession("initial");
-    });
-  }, [activeId, card, completeCheckpoint, loadSession, registerTourAction, session]);
 
   if (!progress && session === null) return <div className="loading">正在准备今天的练习…</div>;
 

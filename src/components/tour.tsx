@@ -1,23 +1,14 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { Compass, X } from "lucide-react";
 import { Button } from "@/components/ui";
 
-type Step = { selector: string; title: string; detail: string; checkpoint?: string; advanceOnPath?: string };
-export type TourId = "onboarding" | "today" | "cards" | "library" | "review" | "interview" | "knowledge" | "settings";
+type Step = { selector: string; title: string; detail: string };
+export type TourId = "today" | "cards" | "library" | "review" | "interview" | "knowledge" | "settings";
 
 const tours: Record<TourId, Step[]> = {
-  onboarding: [
-    { selector: '[data-tour="nav-cards"]', title: "切换到录入", detail: "点击“录入”，我们会在手动录入表单里打开这张演示卡。", advanceOnPath: "/cards" },
-    { selector: '[data-tour="tutorial-card-editor"]', title: "像平常一样修改卡片", detail: "这里就是日常手动录入表单。可以直接修改问题、答案要点、提示、类型和标签，然后保存这张演示卡。", checkpoint: "tutorial-card-saved" },
-    { selector: '[data-tour="nav-review"]', title: "切换到学习", detail: "点击“学习”，用刚刚保存的演示卡完成首次学习。", advanceOnPath: "/review" },
-    { selector: '[data-tour="review-initial-card"]', title: "开始首次学习", detail: "只需点击这张“首次学习”卡。教程会精确安排刚才保存的演示卡。", checkpoint: "review-started" },
-    { selector: '[data-tour="initial-study-flow"]', title: "先看懂，再复述", detail: "首次学习不会要求默写或评分：逐条查看答案要点，口头复述后，明天再进行第一次主动回忆。", checkpoint: "initial-study-completed" },
-    { selector: '[data-tour="nav-library"]', title: "切换到卡片库", detail: "点击“卡片库”，最后看看这张演示卡如何归档或永久删除。", advanceOnPath: "/library" },
-    { selector: '[data-tour="tutorial-library-card"]', title: "管理演示卡", detail: "这张演示卡现在就在卡片库中。你可以归档，或永久删除并清除它的学习记录。" },
-  ],
   today: [
     { selector: '[data-tour="today-summary"]', title: "今天的全景", detail: "这里汇总待复习、今日完成和任务进度。" },
     { selector: '[data-tour="home-tutorial"]', title: "基础教程", detail: "随时从这里重新走一遍录入到首次学习的最短路径。" },
@@ -41,13 +32,11 @@ const tours: Record<TourId, Step[]> = {
   ],
   interview: [{ selector: '[data-tour="interview-start"]', title: "开始模拟", detail: "问题来自你的卡片，回答会被记录到本场报告。" }, { selector: '[data-tour="interview-followup"]', title: "AI 拓展追问", detail: "完成原题后可让 LLM 针对回答生成一条追问；报告会清晰标注。" }, { selector: '[data-tour="interview-report"]', title: "复盘报告", detail: "模拟结束后查看逐题反馈和遗漏要点，把薄弱点带回训练。" }],
   knowledge: [{ selector: '[data-tour="knowledge-analysis"]', title: "分析建议", detail: "应用根据你的卡片生成需要补充或维护的知识库建议。" }, { selector: '[data-tour="knowledge-review"]', title: "审核后手动修改", detail: "先确认，再复制到 Obsidian 手动修改；应用不会写入原笔记。" }],
-  settings: [{ selector: '[data-tour="settings-goals"]', title: "每日训练目标", detail: "设置每日首次学习和到期复习数量；超过目标仍可继续练习。" }, { selector: '[data-tour="settings-model"]', title: "模型服务", detail: "在本机保存模型连接配置；密钥不会显示在页面上。" }, { selector: '[data-tour="settings-backup"]', title: "备份与迁移", detail: "下载 JSON 备份，或在新设备预览后合并、替换恢复。" }],
+  settings: [{ selector: '[data-tour="settings-goals"]', title: "每日训练目标", detail: "设置每日首次学习和到期复习数量；超过目标仍可继续练习。" }, { selector: '[data-tour="settings-model"]', title: "模型服务", detail: "在本机保存模型连接配置；密钥不会显示在页面上。" }, { selector: '[data-tour="settings-experimental"]', title: "测试功能", detail: "模拟面试与知识库仍在开发中；可从这里进入并体验当前版本。" }, { selector: '[data-tour="settings-backup"]', title: "备份与迁移", detail: "下载 JSON 备份，或在新设备预览后合并、替换恢复。" }],
 };
 
-type TourAction = () => void | string | Promise<void | string>;
-type TourContextValue = { startTour: (id: TourId) => void; startOnboarding: () => Promise<void>; completeCheckpoint: (name: string) => void; registerTourAction: (checkpoint: string, action: TourAction) => () => void; activeId: TourId | null; tutorialCardId: string | null };
+type TourContextValue = { startTour: (id: TourId) => void; activeId: TourId | null };
 const TourContext = createContext<TourContextValue | null>(null);
-const storageKey = "mock-interview:onboarding";
 
 export function useTour() {
   const value = useContext(TourContext);
@@ -55,59 +44,21 @@ export function useTour() {
   return value;
 }
 
-export function TourButton({ tour, label = "本页教程", iconOnly = false }: { tour: Exclude<TourId, "onboarding">; label?: string; iconOnly?: boolean }) {
+export function TourButton({ tour, label = "本页教程", iconOnly = false }: { tour: TourId; label?: string; iconOnly?: boolean }) {
   const { startTour } = useTour();
   return <Button type="button" variant="ghost" className={`tour-trigger ${iconOnly ? "icon-only" : ""}`} data-tooltip={iconOnly ? label : undefined} aria-label={iconOnly ? label : undefined} title={iconOnly ? label : undefined} onClick={() => startTour(tour)}><Compass size={17}/>{!iconOnly && label}</Button>;
 }
 
 export function TourProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const router = useRouter();
-  const [activeId, setActiveId] = useState<TourId | null>(null); const [index, setIndex] = useState(0); const [rect, setRect] = useState<DOMRect | null>(null); const [tutorialCardId, setTutorialCardId] = useState<string | null>(null); const targetRef = useRef<HTMLElement | null>(null); const targetContainerRef = useRef<HTMLElement | null>(null); const blockedContainersRef = useRef<HTMLElement[]>([]);
-  const actionsRef = useRef(new Map<string, TourAction>()); const actionInProgressRef = useRef(false);
-  const [actionNotice, setActionNotice] = useState("");
+  const [activeId, setActiveId] = useState<TourId | null>(null); const [index, setIndex] = useState(0); const [rect, setRect] = useState<DOMRect | null>(null); const targetRef = useRef<HTMLElement | null>(null); const targetContainerRef = useRef<HTMLElement | null>(null); const blockedContainersRef = useRef<HTMLElement[]>([]);
   const active = activeId ? tours[activeId] : []; const step = active[index]; const dialogRef = useRef<HTMLDivElement>(null);
-  const close = useCallback((completed = false) => { targetRef.current?.classList.remove("tour-target-active"); targetContainerRef.current?.classList.remove("tour-target-container"); blockedContainersRef.current.forEach((node) => node.classList.remove("tour-blocked-container")); targetRef.current = null; targetContainerRef.current = null; blockedContainersRef.current = []; actionInProgressRef.current = false; setActionNotice(""); if (activeId === "onboarding") { if (completed) window.localStorage.setItem(storageKey, "completed"); window.sessionStorage.removeItem(storageKey); setTutorialCardId(null); } setActiveId(null); setIndex(0); setRect(null); }, [activeId]);
-  const startOnboarding = useCallback(async () => { const response = await fetch("/api/tutorial/sample", { method: "POST" }); const data = await response.json(); if (!response.ok) throw new Error(data.error ?? "无法创建演示卡。"); setTutorialCardId(data.card.id); setActiveId("onboarding"); setIndex(0); window.sessionStorage.setItem(storageKey, JSON.stringify({ version: 2, index: 0, cardId: data.card.id })); }, []);
-  const startTour = useCallback((id: TourId) => { if (id === "onboarding") { void startOnboarding(); return; } setActiveId(id); setIndex(0); }, [startOnboarding]);
-  const completeCheckpoint = useCallback((name: string) => { if (!activeId || !step?.checkpoint || step.checkpoint !== name) return; actionInProgressRef.current = false; setActionNotice(""); setIndex((value) => value + 1); }, [activeId, step?.checkpoint]);
-  const registerTourAction = useCallback((checkpoint: string, action: TourAction) => {
-    actionsRef.current.set(checkpoint, action);
-    return () => { if (actionsRef.current.get(checkpoint) === action) actionsRef.current.delete(checkpoint); };
-  }, []);
-
-  useEffect(() => {
-    const saved = window.sessionStorage.getItem(storageKey);
-    if (!activeId && saved !== null) { try { const value = JSON.parse(saved) as { version?: number; index: number; cardId: string }; if (value.version === 2 && Number.isFinite(value.index) && value.cardId) { setActiveId("onboarding"); setIndex(value.index); setTutorialCardId(value.cardId); } else window.sessionStorage.removeItem(storageKey); } catch { window.sessionStorage.removeItem(storageKey); } }
-  }, [activeId]);
-  useEffect(() => {
-    if (!step) return;
-    if (activeId === "onboarding" && step.advanceOnPath === pathname) setIndex((value) => value + 1);
-    if (activeId === "onboarding" && tutorialCardId) window.sessionStorage.setItem(storageKey, JSON.stringify({ version: 2, index, cardId: tutorialCardId }));
-  }, [activeId, index, pathname, step, tutorialCardId]);
+  const close = useCallback(() => { targetRef.current?.classList.remove("tour-target-active"); targetContainerRef.current?.classList.remove("tour-target-container"); blockedContainersRef.current.forEach((node) => node.classList.remove("tour-blocked-container")); targetRef.current = null; targetContainerRef.current = null; blockedContainersRef.current = []; setActiveId(null); setIndex(0); setRect(null); }, []);
+  const startTour = useCallback((id: TourId) => { setActiveId(id); setIndex(0); }, []);
   const next = useCallback(() => {
     if (!step) return;
-    setActionNotice("");
-    if (step.advanceOnPath) {
-      router.push(step.advanceOnPath);
-      return;
-    }
-    if (step.checkpoint) {
-      if (actionInProgressRef.current) return;
-      const action = actionsRef.current.get(step.checkpoint);
-      if (!action) { setActionNotice("正在准备这一步；如果内容刚加载完成，请再点一次下一步。"); return; }
-      actionInProgressRef.current = true;
-      void Promise.resolve(action()).then((notice) => {
-        actionInProgressRef.current = false;
-        if (notice) setActionNotice(notice);
-      }).catch(() => {
-        actionInProgressRef.current = false;
-        setActionNotice("这一步暂未完成，请检查内容后再试一次。");
-      });
-      return;
-    }
-    if (index >= active.length - 1) close(true); else setIndex(index + 1);
-  }, [active.length, close, index, router, step]);
+    if (index >= active.length - 1) close(); else setIndex(index + 1);
+  }, [active.length, close, index, step]);
   useLayoutEffect(() => {
     if (!step) return;
     let settleTimer: number | undefined;
@@ -146,6 +97,6 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
     if (rect.left >= width + gap) return { left: gap, right: "auto", width };
     return undefined;
   }, [rect]);
-  const nextLabel = step?.advanceOnPath ? "下一步：切换页面" : step?.checkpoint === "tutorial-card-saved" ? "下一步：保存演示卡" : step?.checkpoint === "review-started" ? "下一步：开始首次学习" : step?.checkpoint === "initial-study-completed" ? "下一步：完成首学" : index >= active.length - 1 ? "完成教程" : "下一步";
-  return <TourContext.Provider value={{ startTour, startOnboarding, completeCheckpoint, registerTourAction, activeId, tutorialCardId }}>{children}{activeId && step && <div className="tour-layer" aria-live="polite"><div className="tour-scrim"/><div className="tour-spotlight" style={style}/><div className="tour-dialog" style={dialogStyle} ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="tour-title"><button className="icon-close tour-close" type="button" aria-label="关闭教程" onClick={() => close()}><X size={18}/></button><p className="eyebrow"><Compass size={15}/> {activeId === "onboarding" ? "基础教程" : "本页教程"} · {index + 1}/{active.length}</p><h2 id="tour-title">{step.title}</h2><p>{step.detail}</p>{!rect && <small>正在定位此页内容；你仍可以继续教程。</small>}{actionNotice && <small role="status">{actionNotice}</small>}<div className="tour-actions"><Button type="button" variant="ghost" onClick={() => close()}>跳过</Button><Button type="button" variant="ghost" disabled={index === 0} onClick={() => setIndex(index - 1)}>上一步</Button><Button type="button" onClick={next}>{nextLabel}</Button></div></div></div>}</TourContext.Provider>;
+  const nextLabel = index >= active.length - 1 ? "完成教程" : "下一步";
+  return <TourContext.Provider value={{ startTour, activeId }}>{children}{activeId && step && <div className="tour-layer" aria-live="polite"><div className="tour-scrim"/><div className="tour-spotlight" style={style}/><div className="tour-dialog" style={dialogStyle} ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="tour-title"><button className="icon-close tour-close" type="button" aria-label="关闭教程" onClick={close}><X size={18}/></button><p className="eyebrow"><Compass size={15}/> 本页教程 · {index + 1}/{active.length}</p><h2 id="tour-title">{step.title}</h2><p>{step.detail}</p>{!rect && <small>正在定位此页内容；你仍可以继续教程。</small>}<div className="tour-actions"><Button type="button" variant="ghost" onClick={close}>跳过</Button><Button type="button" variant="ghost" disabled={index === 0} onClick={() => setIndex(index - 1)}>上一步</Button><Button type="button" onClick={next}>{nextLabel}</Button></div></div></div>}</TourContext.Provider>;
 }
