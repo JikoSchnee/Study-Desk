@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Archive, ArrowUpDown, CalendarClock, CheckCircle2, Clock3, Download, FilePlus2, FileSpreadsheet, LayoutGrid, LibraryBig, MessageSquareText, MoreHorizontal, PencilLine, Search, Sparkles, Tag, Trash2, Undo2, X } from "lucide-react";
+import { Archive, ArrowUpDown, CalendarClock, CheckCircle2, Clock3, Download, FilePlus2, FileSpreadsheet, LayoutGrid, LibraryBig, MessageSquareText, MoreHorizontal, PencilLine, Search, Sparkles, Tag, Tags, Trash2, Undo2, X } from "lucide-react";
 import { CardWorkspace } from "@/components/card-workspace";
 import { CardDetailsDialog } from "@/components/card-details-dialog";
 import { AnswerStructureEditor as AnswerPointsEditor, cardRecommendationDraftKey, cardRecommendationExcludedIds, type CardRecommendationDraft, type CardRecommendationResult, QuestionWordingsEditor, RelatedCardsEditor, TagRecommendations, useCardRecommendations } from "@/components/card-form-editors";
@@ -9,6 +9,8 @@ import { RarityPreviewDialog } from "@/components/rarity-preview-dialog";
 import { KnowledgeBaseExamplesDialog } from "@/components/knowledge-base-examples-dialog";
 import { KnowledgeCardFrame } from "@/components/knowledge-card-frame";
 import { LLMConfigurationDialog } from "@/components/llm-configuration-dialog";
+import { TagManagerDialog } from "@/components/tag-manager-dialog";
+import { formatTag } from "@/lib/tags-client";
 import { PageHeader, PageLayout } from "@/components/page-layout";
 import { SearchableSelect } from "@/components/searchable-select";
 import { Button, Chip, EmptyState } from "@/components/ui";
@@ -16,7 +18,7 @@ import { TourButton } from "@/components/tour";
 import { difficultyTier, filterAndSortCards, type CardSort, type SortDirection } from "@/lib/card-filters";
 import { rarityPreset, stabilityRarityTier, type StabilityRarityPreset } from "@/lib/card-tiers";
 import { answerPointsToNumberedText, splitTags } from "@/lib/import";
-import type { AnswerPoint, Card, CardLearningDetails, CardLearningSummary, CardRelation, CardRelationType, QuestionVariant } from "@/lib/types";
+import type { AnswerPoint, Card, CardLearningDetails, CardLearningSummary, CardRelation, CardRelationType, QuestionVariant, Tag as TagItem, TagDisplayLanguage } from "@/lib/types";
 
 type CardDraft = { question: string; questionVariants: QuestionVariant[]; relations: CardRelation[]; answerPoints: AnswerPoint[]; note: string; track: string; tags: string; source: string };
 type EditorSaveState = "idle" | "saving" | "success";
@@ -174,6 +176,9 @@ export function CardLibrary() {
   const [needsLLMConfiguration, setNeedsLLMConfiguration] = useState(false);
   const [rarityPreviewOpen, setRarityPreviewOpen] = useState(false);
   const [knowledgeExamplesOpen, setKnowledgeExamplesOpen] = useState(false);
+  const [tagManagerOpen, setTagManagerOpen] = useState(false);
+  const [tagCatalog, setTagCatalog] = useState<TagItem[]>([]);
+  const [tagDisplayLanguage, setTagDisplayLanguage] = useState<TagDisplayLanguage>("zh");
   const [stabilityRarityPreset, setStabilityRarityPreset] = useState<StabilityRarityPreset>("memory-cycle");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showArchived, setShowArchived] = useState(false);
@@ -195,10 +200,13 @@ export function CardLibrary() {
   const load = useCallback(() => Promise.all([
     fetch("/api/cards").then((response) => response.json()),
     fetch("/api/settings").then((response) => response.json()),
-  ]).then(([data, settings]) => {
+    fetch("/api/tags").then((response) => response.json()),
+  ]).then(([data, settings, tagData]) => {
     setCards(data.cards);
     setLearningByCardId(data.learning ?? {});
     setStabilityRarityPreset(rarityPreset(settings.stabilityRarityPreset));
+    setTagDisplayLanguage(settings.tagDisplayLanguage === "en" || settings.tagDisplayLanguage === "both" ? settings.tagDisplayLanguage : "zh");
+    setTagCatalog(tagData.tags ?? []);
   }), []);
   useEffect(() => { load(); }, [load]);
   useEffect(() => () => {
@@ -231,6 +239,7 @@ export function CardLibrary() {
   const savedKnowledgeBaseTypes = useMemo(() => [...new Set(cards.map((card) => card.track))].sort((left, right) => left.localeCompare(right, "zh-CN")), [cards]);
   const knowledgeBaseTypeSuggestions = useMemo(() => [...new Set([...defaultKnowledgeBaseTypes, ...savedKnowledgeBaseTypes])].sort((left, right) => left.localeCompare(right, "zh-CN")), [savedKnowledgeBaseTypes]);
   const tags = useMemo(() => [...new Set(cards.flatMap((card) => card.tags))].sort((left, right) => left.localeCompare(right, "zh-CN")), [cards]);
+  const tagLabel = useCallback((key: string) => { const tag = tagCatalog.find((item) => item.key === key.toLocaleLowerCase()); return tag ? formatTag(tag, tagDisplayLanguage) : key; }, [tagCatalog, tagDisplayLanguage]);
   const visibleCards = useMemo(() => filterAndSortCards(cards.filter((card) => showArchived ? card.status === "archived" : card.status !== "archived"), learningByCardId, { query, track: selectedTrack, tags: selectedTags, sort, direction: sortDirection }), [cards, learningByCardId, query, selectedTrack, selectedTags, sort, sortDirection, showArchived]);
   const changeSort = (next: CardSort) => { setSort(next); setSortDirection(next === "review" || next === "difficulty" ? "asc" : "desc"); };
   const clearFilters = () => { setQuery(""); setSelectedTrack(""); setSelectedTags(new Set()); setSort("created"); setSortDirection("desc"); setShowArchived(false); };
@@ -366,8 +375,8 @@ export function CardLibrary() {
     const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = `mock-interview-cards.${format}`; link.click(); URL.revokeObjectURL(url);
   };
 
-  return <PageLayout className="cards-library-page">{detail && <CardDetailsDialog card={detail.card} relatedCards={detail.relatedCards} learning={detail.learning} onClose={() => setDetail(null)} />}{rarityPreviewOpen && <RarityPreviewDialog preset={stabilityRarityPreset} onClose={() => setRarityPreviewOpen(false)} />}{knowledgeExamplesOpen && <KnowledgeBaseExamplesDialog preset={stabilityRarityPreset} onClose={() => setKnowledgeExamplesOpen(false)} />}<LLMConfigurationDialog open={needsLLMConfiguration} onClose={() => setNeedsLLMConfiguration(false)} purpose="AI 补充问法" />
-    <PageHeader eyebrow={<><LibraryBig size={15}/> 卡片库</>} title="把积累的知识，随时翻出来练。" description="筛选、编辑或查看学习轨迹，让每一张卡片保持可用。" tour="library" actionRows={<div className="library-header-actions"><div className="library-header-action-row"><Button type="button" variant="secondary" onClick={() => setKnowledgeExamplesOpen(true)}><LayoutGrid size={17}/> 知识库示例</Button><TourButton tour="library" iconOnly /></div><div className="library-header-action-row"><Button type="button" onClick={() => openWorkspace("manual")} data-tour="library-create-card"><FilePlus2 size={17}/> 创建卡片</Button><div className="cards-import-actions"><Button type="button" variant="secondary" onClick={() => openWorkspace("import")}><FileSpreadsheet size={17}/> 导入卡片</Button><details className="template-download"><summary>下载模板文件</summary><div className="template-download-options"><p>CSV 模板中，其他问法、答案要点和回忆提示均可在同一单元格内换行；答案与提示会按行配对。</p><a href="/cards-import-template.md" download>Markdown 模板</a><a href="/cards-import-template.csv" download>CSV 模板（完整字段）</a></div></details></div></div></div>} />
+  return <PageLayout className="cards-library-page">{detail && <CardDetailsDialog card={detail.card} relatedCards={detail.relatedCards} learning={detail.learning} onClose={() => setDetail(null)} />}{rarityPreviewOpen && <RarityPreviewDialog preset={stabilityRarityPreset} onClose={() => setRarityPreviewOpen(false)} />}{knowledgeExamplesOpen && <KnowledgeBaseExamplesDialog preset={stabilityRarityPreset} onClose={() => setKnowledgeExamplesOpen(false)} />}{tagManagerOpen && <TagManagerDialog tags={tagCatalog} language={tagDisplayLanguage} onClose={() => setTagManagerOpen(false)} onChange={load} />}<LLMConfigurationDialog open={needsLLMConfiguration} onClose={() => setNeedsLLMConfiguration(false)} purpose="AI 补充问法" />
+    <PageHeader eyebrow={<><LibraryBig size={15}/> 卡片库</>} title="把积累的知识，随时翻出来练。" description="筛选、编辑或查看学习轨迹，让每一张卡片保持可用。" tour="library" actionRows={<div className="library-header-actions"><div className="library-header-action-row"><Button type="button" variant="secondary" onClick={() => setTagManagerOpen(true)}><Tags size={17}/> 标签管理</Button><Button type="button" variant="secondary" onClick={() => setKnowledgeExamplesOpen(true)}><LayoutGrid size={17}/> 知识库示例</Button><TourButton tour="library" iconOnly /></div><div className="library-header-action-row"><Button type="button" onClick={() => openWorkspace("manual")} data-tour="library-create-card"><FilePlus2 size={17}/> 创建卡片</Button><div className="cards-import-actions"><Button type="button" variant="secondary" onClick={() => openWorkspace("import")}><FileSpreadsheet size={17}/> 导入卡片</Button><details className="template-download"><summary>下载模板文件</summary><div className="template-download-options"><p>CSV 模板中，其他问法、答案要点和回忆提示均可在同一单元格内换行；答案与提示会按行配对。</p><a href="/cards-import-template.md" download>Markdown 模板</a><a href="/cards-import-template.csv" download>CSV 模板（完整字段）</a></div></details></div></div></div>} />
     {notice && <div className="notice" role="status" style={{ marginBottom: 20 }}>{notice}</div>}
     <div className={`library-workspace ${workspaceOpen ? "open" : ""}`} aria-hidden={!workspaceOpen}><div className="library-workspace-inner">{workspaceMode && <CardWorkspace key={workspaceMode} initialMode={workspaceMode} onClose={closeWorkspace} onComplete={completeWorkspace} />}</div></div>
     {editingCard && editingDraft && <div className="card-editor-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeEditor(); }}><section className="card-editor-modal" role="dialog" aria-modal="true" aria-labelledby="card-editor-title" aria-busy={editorSaveState !== "idle"}>
@@ -432,7 +441,7 @@ export function CardLibrary() {
               <span><CalendarClock size={14}/> 下次：{compactReviewTime(learning?.nextReviewAt, true)}</span>
               <span><Clock3 size={14}/> 上次：{compactReviewTime(learning?.lastReviewAt)}</span>
             </div>
-            <div className="card-meta"><Chip tone="blue">类型：{card.track}</Chip>{card.tags.map((tag) => <Chip key={tag} tone="ink">#{tag}</Chip>)}</div>
+            <div className="card-meta"><Chip tone="blue">类型：{card.track}</Chip>{card.tags.map((tag) => <Chip key={tag} tone="ink">#{tagLabel(tag)}</Chip>)}</div>
           </div>
         </KnowledgeCardFrame>;
       })}</div> : <EmptyState title="没有符合条件的卡片" detail="换个关键词，或清除筛选条件再试试。" /> : <EmptyState title="你的题库还没有内容" detail="从一个你曾经答得不够顺的问题开始记录。" action={<Button type="button" onClick={() => openWorkspace("manual")}>创建第一张卡片</Button>} />}

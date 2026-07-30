@@ -1,16 +1,17 @@
 import "server-only";
 import { sqlite } from "@/lib/db";
 import { rarityPreset, type StabilityRarityPreset } from "@/lib/card-tiers";
-import type { AnswerComparisonMode } from "@/lib/types";
+import type { AnswerComparisonMode, TagDisplayLanguage } from "@/lib/types";
 
 export type AppSettings = {
   dailyInitialTarget: number;
   dailyReviewTarget: number;
   answerComparisonMode: AnswerComparisonMode;
   stabilityRarityPreset: StabilityRarityPreset;
+  tagDisplayLanguage: TagDisplayLanguage;
 };
 
-const defaults: AppSettings = { dailyInitialTarget: 5, dailyReviewTarget: 10, answerComparisonMode: "embedding", stabilityRarityPreset: "memory-cycle" };
+const defaults: AppSettings = { dailyInitialTarget: 5, dailyReviewTarget: 10, answerComparisonMode: "embedding", stabilityRarityPreset: "memory-cycle", tagDisplayLanguage: "zh" };
 
 export function getAppSettings(): AppSettings {
   const rows = sqlite.prepare("SELECT key, value FROM settings").all() as Array<{ key: string; value: string }>;
@@ -21,6 +22,7 @@ export function getAppSettings(): AppSettings {
     dailyReviewTarget: Number(values.dailyReviewTarget) || defaults.dailyReviewTarget,
     answerComparisonMode: values.answerComparisonMode === "llm" ? "llm" : "embedding",
     stabilityRarityPreset: rarityPreset(values.stabilityRarityPreset),
+    tagDisplayLanguage: values.tagDisplayLanguage === "en" || values.tagDisplayLanguage === "both" ? values.tagDisplayLanguage : "zh",
   };
 }
 
@@ -30,5 +32,6 @@ export function saveAppSettings(input: AppSettings) {
   statement.run("dailyReviewTarget", String(input.dailyReviewTarget));
   statement.run("answerComparisonMode", input.answerComparisonMode);
   statement.run("stabilityRarityPreset", input.stabilityRarityPreset);
+  statement.run("tagDisplayLanguage", input.tagDisplayLanguage);
   return input;
 }

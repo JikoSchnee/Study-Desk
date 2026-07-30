@@ -7,7 +7,7 @@ import { Button, Panel } from "@/components/ui";
 import { PageLayout } from "@/components/page-layout";
 import { rarityPresetOptions, type StabilityRarityPreset } from "@/lib/card-tiers";
 import { modelProviders, type ModelProviderId } from "@/lib/model-providers";
-import type { AnswerComparisonMode } from "@/lib/types";
+import type { AnswerComparisonMode, TagDisplayLanguage } from "@/lib/types";
 
 type EnvironmentSettings = { provider: ModelProviderId; baseUrl: string; model: string; apiKeyConfigured: boolean };
 type LocalEmbeddingModelStatus = { state: "pending" | "downloading" | "verifying" | "retrying" | "ready" | "error"; onnxState: "pending" | "parsing" | "ready" | "failed"; downloadedBytes: number; totalBytes: number | null; attempt: number; error?: string };
@@ -26,6 +26,7 @@ export default function SettingsPage() {
   const [dailyReviewTarget, setDailyReviewTarget] = useState(10);
   const [answerComparisonMode, setAnswerComparisonMode] = useState<AnswerComparisonMode>("embedding");
   const [stabilityRarityPreset, setStabilityRarityPreset] = useState<StabilityRarityPreset>("memory-cycle");
+  const [tagDisplayLanguage, setTagDisplayLanguage] = useState<TagDisplayLanguage>("zh");
   const [notice, setNotice] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [model, setModel] = useState("");
@@ -49,7 +50,7 @@ export default function SettingsPage() {
   useEffect(() => {
     Promise.all([fetch("/api/settings").then((response) => response.json()), fetch("/api/settings/environment").then((response) => response.json())])
       .then(([settings, environment]) => {
-        setDailyInitialTarget(settings.dailyInitialTarget ?? 5); setDailyReviewTarget(settings.dailyReviewTarget ?? 10); setAnswerComparisonMode(settings.answerComparisonMode === "llm" ? "llm" : "embedding"); setStabilityRarityPreset(["fast", "memory-cycle", "long-term"].includes(settings.stabilityRarityPreset) ? settings.stabilityRarityPreset : "memory-cycle");
+        setDailyInitialTarget(settings.dailyInitialTarget ?? 5); setDailyReviewTarget(settings.dailyReviewTarget ?? 10); setAnswerComparisonMode(settings.answerComparisonMode === "llm" ? "llm" : "embedding"); setStabilityRarityPreset(["fast", "memory-cycle", "long-term"].includes(settings.stabilityRarityPreset) ? settings.stabilityRarityPreset : "memory-cycle"); setTagDisplayLanguage(settings.tagDisplayLanguage === "en" || settings.tagDisplayLanguage === "both" ? settings.tagDisplayLanguage : "zh");
         const config = environment as EnvironmentSettings;
         setProvider(config.provider ?? "custom"); setSavedProvider(config.provider ?? "custom"); setBaseUrl(config.baseUrl ?? ""); setModel(config.model ?? ""); setApiKeyConfigured(Boolean(config.apiKeyConfigured));
       });
@@ -71,7 +72,7 @@ export default function SettingsPage() {
   }, []);
 
   const save = async () => {
-    await fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dailyInitialTarget, dailyReviewTarget, answerComparisonMode, stabilityRarityPreset }) });
+    await fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dailyInitialTarget, dailyReviewTarget, answerComparisonMode, stabilityRarityPreset, tagDisplayLanguage }) });
     setNotice("每日训练目标、答案比对与稀有度方案已保存。");
   };
 
@@ -140,6 +141,7 @@ export default function SettingsPage() {
     <header className="page-header"><div><p className="eyebrow"><SlidersHorizontal size={15}/> 设置</p><h1>把节奏调成适合你的样子。</h1><p>本地优先，配置只保存在你的设备上。</p></div></header>
     <div className="two-column">
       <Panel><div className="form-grid"><label className="field">每日首次学习数<select value={dailyInitialTarget} onChange={(event) => setDailyInitialTarget(Number(event.target.value))}>{[0, 3, 5, 8, 10, 15].map((count) => <option value={count} key={count}>{count} 张</option>)}</select><span className="field-help">首页安排新卡目标；完成后仍可继续首次学习。</span></label><label className="field">每日到期复习数<select value={dailyReviewTarget} onChange={(event) => setDailyReviewTarget(Number(event.target.value))}>{[0, 5, 10, 15, 20, 30].map((count) => <option value={count} key={count}>{count} 张</option>)}</select><span className="field-help">按 min(目标，到期数) 安排；你始终可以超额复习。</span></label><label className="field">Stability 稀有度方案<select value={stabilityRarityPreset} onChange={(event) => setStabilityRarityPreset(event.target.value as StabilityRarityPreset)}>{rarityPresetOptions.map((option) => <option value={option.id} key={option.id}>{option.name}</option>)}</select><span className="field-help">{rarityPresetOptions.find((option) => option.id === stabilityRarityPreset)?.description}</span></label><label className="field">默认答案比对<select value={answerComparisonMode} onChange={(event) => setAnswerComparisonMode(event.target.value as AnswerComparisonMode)}><option value="embedding">本地语义（bge-m3，首次后台下载）</option><option value="llm">LLM 判断（使用已配置模型）</option></select><span className="field-help">每次进入都会检查模型；未完成时会在后台续传下载。LLM 模式会将参考答案与本次回答发送给当前服务商。</span></label><div className="embedding-download-status" role="status" aria-live="polite"><strong>{embeddingStatus.state === "ready" ? "bge-m3 已就绪" : embeddingStatus.state === "retrying" ? `下载失败，正在第 ${embeddingStatus.attempt} 次重试` : embeddingStatus.state === "error" ? "bge-m3 下载失败" : "正在准备 bge-m3"}</strong><div className="embedding-status-step"><b>1. 下载向量模型</b><progress value={embeddingStatus.totalBytes ? embeddingStatus.downloadedBytes : undefined} max={embeddingStatus.totalBytes ?? undefined} /><span>{embeddingStatus.totalBytes ? `${sizeLabel(embeddingStatus.downloadedBytes)} / ${sizeLabel(embeddingStatus.totalBytes)} · ${Math.min(100, Math.round(embeddingStatus.downloadedBytes / embeddingStatus.totalBytes * 100))}%` : embeddingStatus.downloadedBytes ? `已下载 ${sizeLabel(embeddingStatus.downloadedBytes)}` : "等待开始"}</span></div><div className="embedding-status-step"><b>2. 解析 ONNX 模型</b><progress value={embeddingStatus.onnxState === "ready" ? 1 : embeddingStatus.onnxState === "parsing" ? undefined : 0} max={1} /><span>{embeddingStatus.onnxState === "ready" ? "解析并加载完成" : embeddingStatus.onnxState === "parsing" ? "正在由 ONNX Runtime 解析模型…" : embeddingStatus.onnxState === "failed" ? "解析失败，将清理损坏文件后重试" : "等待模型文件下载完成"}</span></div>{embeddingStatus.state === "ready" && <span>本地模型已缓存，可离线进行语义比对。</span>}{embeddingStatus.error && <span>{embeddingStatus.error}</span>}</div><div className="form-actions"><Button type="button" variant="outline" disabled={warmingModel || embeddingStatus.state === "downloading" || embeddingStatus.state === "retrying" || embeddingStatus.state === "verifying"} onClick={redownloadEmbeddingModel}>{warmingModel ? "正在启动下载…" : "重新下载向量模型"}</Button><Button onClick={save}><Save size={17}/> 保存学习偏好</Button></div>{notice && <p className="muted-copy" role="status">{notice}</p>}</div></Panel>
+      <Panel className="tag-language-panel"><p className="eyebrow">标签显示</p><h2>双语标签</h2><div className="form-grid"><label className="field">优先展示<select value={tagDisplayLanguage} onChange={(event) => setTagDisplayLanguage(event.target.value as TagDisplayLanguage)}><option value="zh">中文优先</option><option value="en">英文优先</option><option value="both">全部展示（中文 | English）</option></select><span className="field-help">未填写的一种语言会自动显示另一种语言；保存后应用到所有卡片标签。</span></label></div></Panel>
       <Panel className="environment-panel">
         <p className="eyebrow"><KeyRound size={15}/> 本地 .env.local</p><h2>模型服务</h2><p className="muted-copy">选择服务商、具体模型并填写 API Key；未列出的模型可直接自定义填写。</p>
         <div className="form-grid">

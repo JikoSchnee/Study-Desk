@@ -12,6 +12,7 @@ export async function PUT(request: Request) {
     dailyReviewTarget: z.number().int().min(0).max(200),
     answerComparisonMode: z.enum(["embedding", "llm"]).default("embedding"),
     stabilityRarityPreset: z.enum(["fast", "memory-cycle", "long-term"]).default("memory-cycle"),
+    tagDisplayLanguage: z.enum(["zh", "en", "both"]).default("zh"),
   }).parse(await request.json());
   return NextResponse.json(saveAppSettings(input));
 }

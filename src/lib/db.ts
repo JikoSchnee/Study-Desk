@@ -26,6 +26,7 @@ sqlite.exec(`
   CREATE TABLE IF NOT EXISTS knowledge_maintenance_proposals (id TEXT PRIMARY KEY, card_id TEXT NOT NULL, target_path TEXT NOT NULL, status TEXT NOT NULL, file_hash TEXT NOT NULL, created_at TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS knowledge_sync_records (id TEXT PRIMARY KEY, card_id TEXT NOT NULL, target_path TEXT NOT NULL, synced_at TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS tags (id TEXT PRIMARY KEY, tag_key TEXT NOT NULL UNIQUE, chinese TEXT NOT NULL DEFAULT '', english TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS practice_focus (card_id TEXT PRIMARY KEY, is_weak INTEGER NOT NULL DEFAULT 0, is_priority INTEGER NOT NULL DEFAULT 0, reason TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL);
 `);
 

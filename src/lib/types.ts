@@ -3,6 +3,16 @@ export type TaskKind = "review" | "learn" | "interview" | "knowledge";
 export type TaskStatus = "todo" | "done" | "skipped";
 export type RatingName = "again" | "hard" | "good" | "easy";
 export type AnswerComparisonMode = "embedding" | "llm";
+export type TagDisplayLanguage = "zh" | "en" | "both";
+
+export interface Tag {
+  id: string;
+  /** Stable value stored on cards; never shown directly to users. */
+  key: string;
+  chinese: string;
+  english: string;
+  usageCount?: number;
+}
 export type AnswerComparisonSource = "embedding" | "lexical" | "llm";
 export type AnswerPointCoverage = "covered" | "partial" | "missing";
 export type AnswerPointRole = "opening" | "key" | "closing";
