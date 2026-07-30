@@ -78,7 +78,8 @@ function createWindow() {
     frame: process.platform !== "win32",
     backgroundColor: "#ffffff",
     title: "八股训练台",
-    webPreferences: { preload: path.join(__dirname, "preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: false },
+    // Match the compact desktop layout users get after zooming out twice.
+    webPreferences: { preload: path.join(__dirname, "preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: false, zoomFactor: 0.8 },
   });
   mainWindow.on("maximize", sendMaximizeState);
   mainWindow.on("unmaximize", sendMaximizeState);
