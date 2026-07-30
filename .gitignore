@@ -1,6 +1,7 @@
 node_modules
 .next
 release
+desktop/dist
 .cache/
 Quizlet-Anki-资料/
 自建知识库与期末复习-竞品分析报告.md

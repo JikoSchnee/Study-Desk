@@ -1,7 +1,7 @@
 {
-  "name": "mock-interview",
+  "name": "study-desk",
   "version": "1.5.1",
-  "description": "本地优先的面试知识训练桌面应用",
+  "description": "像背单词一样整理自己的知识卡片库",
   "author": "JikoSchnee",
   "private": true,
   "scripts": {
@@ -10,7 +10,8 @@
     "desktop:prepare": "node desktop/prepare-next.cjs",
     "desktop:rebuild": "node desktop/rebuild-native.cjs",
     "desktop:sync-native": "node desktop/sync-native.cjs",
-    "desktop:build": "npm run build && npm run desktop:prepare && npm run desktop:rebuild && npm run desktop:sync-native && npm rebuild better-sqlite3",
+    "desktop:bundle": "node desktop/bundle.cjs",
+    "desktop:build": "npm run build && npm run desktop:prepare && npm run desktop:rebuild && npm run desktop:sync-native && npm rebuild better-sqlite3 && npm run desktop:bundle",
     "desktop:dev": "npm run desktop:build && electron .",
     "desktop:dist": "npm run desktop:build && electron-builder --publish never",
     "start": "next start",
@@ -53,18 +54,19 @@
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   },
-  "main": "desktop/main.cjs",
+  "main": "desktop/dist/main.cjs",
   "build": {
     "appId": "com.jikoschnee.mockinterview",
-    "productName": "八股训练台",
+    "productName": "Study Desk",
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "npmRebuild": false,
     "directories": {
       "output": "release"
     },
     "files": [
-      "desktop/**/*",
-      "package.json"
+      "desktop/dist/**/*",
+      "package.json",
+      "!node_modules/**"
     ],
     "extraResources": [
       {
@@ -93,9 +95,11 @@
     "win": {
       "target": [
         "nsis"
-      ]
+      ],
+      "artifactName": "Study-Desk-Setup-${version}.${ext}"
     },
     "nsis": {
+      "artifactName": "Study-Desk-Setup-${version}.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
@@ -110,7 +114,7 @@
       "gatekeeperAssess": false
     },
     "dmg": {
-      "title": "八股训练台 ${version}"
+      "title": "Study Desk ${version}"
     },
     "afterSign": "desktop/notarize.cjs",
     "publish": [
