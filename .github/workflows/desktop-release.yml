@@ -12,8 +12,8 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -26,13 +26,16 @@ jobs:
     needs: verify
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run desktop:dist -- --mac --arm64
+      - if: ${{ secrets.MACOS_CERTIFICATE == '' }}
+        run: npm run desktop:dist -- --mac --arm64
+      - if: ${{ secrets.MACOS_CERTIFICATE != '' }}
+        run: npm run desktop:dist -- --mac --arm64
         env:
           CSC_LINK: ${{ secrets.MACOS_CERTIFICATE }}
           CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
@@ -48,13 +51,16 @@ jobs:
     needs: verify
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run desktop:dist -- --win --x64
+      - if: ${{ secrets.WINDOWS_CERTIFICATE == '' }}
+        run: npm run desktop:dist -- --win --x64
+      - if: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+        run: npm run desktop:dist -- --win --x64
         env:
           CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE }}
           CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
