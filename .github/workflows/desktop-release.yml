@@ -84,12 +84,26 @@ jobs:
     needs: [build-macos, build-windows]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           path: release
           merge-multiple: true
+      - name: Generate release report from commits
+        shell: bash
+        run: |
+          previous_tag="$(git describe --tags --abbrev=0 "${GITHUB_SHA}^" 2>/dev/null || true)"
+          commit_range="${GITHUB_SHA}"
+          if [ -n "$previous_tag" ]; then commit_range="${previous_tag}..${GITHUB_SHA}"; fi
+          {
+            echo "## 本次更新"
+            echo
+            git log "$commit_range" --format='- `%h` %s%n%n%b'
+          } > RELEASE_NOTES.md
       - uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          body_path: RELEASE_NOTES.md
           prerelease: false
           files: release/*
