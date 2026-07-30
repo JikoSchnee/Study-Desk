@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { isModelProviderId, resolveModelProviderSettings, type ModelProviderId } from "@/lib/model-providers";
 
 // Keep credentials next to the desktop user's data rather than inside a signed app bundle.
-const ENVIRONMENT_FILE = join(process.env.MOCK_INTERVIEW_HOME || process.cwd(), ".env.local");
 const managedKeys = ["LLM_PROVIDER", "LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL"] as const;
 type ManagedKey = (typeof managedKeys)[number];
 type EnvironmentValues = Partial<Record<ManagedKey, string>>;
@@ -29,7 +28,8 @@ function parseValue(raw: string) {
   return value.replace(/\s+#.*$/, "").trim();
 }
 
-function readFile() { return existsSync(ENVIRONMENT_FILE) ? readFileSync(ENVIRONMENT_FILE, "utf8") : ""; }
+function environmentFile() { return join(process.env.MOCK_INTERVIEW_HOME || process.cwd(), ".env.local"); }
+function readFile() { const file = environmentFile(); return existsSync(file) ? readFileSync(file, "utf8") : ""; }
 
 function readManagedValues(content: string) {
   const values: EnvironmentValues = {};
@@ -80,7 +80,7 @@ export function saveEnvironmentSettings(input: { provider: ModelProviderId; base
   const apiKey = input.clearApiKey ? "" : input.apiKey?.trim() || (storedProvider === input.provider ? stored.LLM_API_KEY ?? "" : "");
   const resolved = resolveModelProviderSettings(input.provider, input.baseUrl, input.model);
   const values: EnvironmentValues = { LLM_PROVIDER: resolved.provider, LLM_BASE_URL: resolved.baseUrl, LLM_MODEL: resolved.model, LLM_API_KEY: apiKey };
-  writeFileSync(ENVIRONMENT_FILE, renderEnvironment(content, values), { encoding: "utf8", mode: 0o600 });
+  writeFileSync(environmentFile(), renderEnvironment(content, values), { encoding: "utf8", mode: 0o600 });
 
   for (const key of managedKeys) {
     if (values[key]) process.env[key] = values[key];
