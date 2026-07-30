@@ -184,6 +184,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .today-hero h1 { max-width: 590px; margin: 0; font-size: clamp(37px, 5vw, 58px); line-height: 1.03; letter-spacing: -2.5px; }
 .today-hero p:not(.eyebrow) { max-width: 500px; margin: 13px 0 23px; color: #607459; font-weight: 800; }
 .hero-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.disabled-interview-action { position: relative; display: inline-flex; cursor: not-allowed; }.disabled-interview-action .button { pointer-events: none; }.disabled-interview-badge { position: absolute; top: -7px; right: -7px; display: grid; place-items: center; width: 25px; height: 25px; color: #b63a3a; background: #fff5f5; border: 2px solid #efb3b3; border-radius: 50%; box-shadow: 0 3px 0 rgb(182 58 58 / .15); opacity: 0; pointer-events: none; transform: scale(.72) rotate(-18deg); transition: opacity 140ms ease, transform 140ms ease; }.disabled-interview-action:hover .disabled-interview-badge, .disabled-interview-action:focus-within .disabled-interview-badge { opacity: 1; transform: scale(1) rotate(0); }
 .hero-summary { display: grid; gap: 10px; }
 .hero-stat { padding: 15px 16px; background: var(--snow); border: 2px solid #d7f1c5; border-radius: 15px; }
 .hero-stat strong { display: block; color: var(--green-dark); font-size: 26px; line-height: 1; }
