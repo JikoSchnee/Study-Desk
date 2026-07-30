@@ -1,8 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Archive, ArrowUpDown, CalendarClock, CheckCircle2, Clock3, Download, FilePlus2, LayoutGrid, LibraryBig, MessageSquareText, MoreHorizontal, PencilLine, Search, Sparkles, Tag, Trash2, Undo2, X } from "lucide-react";
+import { Archive, ArrowUpDown, CalendarClock, CheckCircle2, Clock3, Download, FilePlus2, FileSpreadsheet, LayoutGrid, LibraryBig, MessageSquareText, MoreHorizontal, PencilLine, Search, Sparkles, Tag, Trash2, Undo2, X } from "lucide-react";
+import { CardWorkspace } from "@/components/card-workspace";
 import { CardDetailsDialog } from "@/components/card-details-dialog";
 import { AnswerStructureEditor as AnswerPointsEditor, cardRecommendationDraftKey, cardRecommendationExcludedIds, type CardRecommendationDraft, type CardRecommendationResult, QuestionWordingsEditor, RelatedCardsEditor, TagRecommendations, useCardRecommendations } from "@/components/card-form-editors";
 import { RarityPreviewDialog } from "@/components/rarity-preview-dialog";
@@ -12,7 +12,7 @@ import { LLMConfigurationDialog } from "@/components/llm-configuration-dialog";
 import { PageHeader, PageLayout } from "@/components/page-layout";
 import { SearchableSelect } from "@/components/searchable-select";
 import { Button, Chip, EmptyState } from "@/components/ui";
-import { useTour } from "@/components/tour";
+import { TourButton } from "@/components/tour";
 import { difficultyTier, filterAndSortCards, type CardSort, type SortDirection } from "@/lib/card-filters";
 import { rarityPreset, stabilityRarityTier, type StabilityRarityPreset } from "@/lib/card-tiers";
 import { answerPointsToNumberedText, splitTags } from "@/lib/import";
@@ -153,7 +153,6 @@ function useCardRecommendationPreload() {
 }
 
 export function CardLibrary() {
-  const { tutorialCardId } = useTour();
   const [cards, setCards] = useState<Card[]>([]);
   const [learningByCardId, setLearningByCardId] = useState<Record<string, CardLearningSummary>>({});
   const [detail, setDetail] = useState<{ card: Card; relatedCards: Array<Card & { relationType: CardRelationType }>; learning: CardLearningDetails } | null>(null);
@@ -177,6 +176,7 @@ export function CardLibrary() {
   const [stabilityRarityPreset, setStabilityRarityPreset] = useState<StabilityRarityPreset>("memory-cycle");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showArchived, setShowArchived] = useState(false);
+  const [workspaceMode, setWorkspaceMode] = useState<"manual" | "import" | null>(null);
   const editorSaveStatusRef = useRef<HTMLDivElement>(null);
   const recommendationPreload = useCardRecommendationPreload();
   const editorRecommendationDraft = useMemo<CardRecommendationDraft>(() => ({ question: editingDraft?.question ?? "", questionVariants: editingDraft?.questionVariants ?? [], answerPoints: editingDraft?.answerPoints ?? [], note: editingDraft?.note ?? "", track: editingDraft?.track ?? "", tags: splitTags(editingDraft?.tags ?? "") }), [editingDraft]);
@@ -199,23 +199,41 @@ export function CardLibrary() {
   }), []);
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
-    if (!tutorialCardId) return;
-    const tutorialCard = cards.find((card) => card.id === tutorialCardId);
-    if (!tutorialCard) return;
-    setQuery(tutorialCard.question);
-    setSelectedTrack("");
-    setSelectedTags(new Set());
-    setShowArchived(false);
-    setSort("created");
-    setSortDirection("desc");
-  }, [cards, tutorialCardId]);
-
+    if (window.localStorage.getItem("mock-interview:supplement-draft") || window.localStorage.getItem("mock-interview:follow-up-card-draft")) setWorkspaceMode("manual");
+  }, []);
+  useEffect(() => {
+    const closeWhenFocusLeaves = (event: FocusEvent | PointerEvent) => {
+      const dropdown = document.querySelector<HTMLDetailsElement>(".template-download[open]");
+      if (dropdown && event.target instanceof Node && !dropdown.contains(event.target)) dropdown.removeAttribute("open");
+    };
+    const closeAfterDownload = (event: MouseEvent) => {
+      const link = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>(".template-download a") : null;
+      link?.closest<HTMLDetailsElement>(".template-download")?.removeAttribute("open");
+    };
+    document.addEventListener("focusin", closeWhenFocusLeaves);
+    document.addEventListener("pointerdown", closeWhenFocusLeaves);
+    document.addEventListener("click", closeAfterDownload);
+    return () => {
+      document.removeEventListener("focusin", closeWhenFocusLeaves);
+      document.removeEventListener("pointerdown", closeWhenFocusLeaves);
+      document.removeEventListener("click", closeAfterDownload);
+    };
+  }, []);
   const savedKnowledgeBaseTypes = useMemo(() => [...new Set(cards.map((card) => card.track))].sort((left, right) => left.localeCompare(right, "zh-CN")), [cards]);
   const knowledgeBaseTypeSuggestions = useMemo(() => [...new Set([...defaultKnowledgeBaseTypes, ...savedKnowledgeBaseTypes])].sort((left, right) => left.localeCompare(right, "zh-CN")), [savedKnowledgeBaseTypes]);
   const tags = useMemo(() => [...new Set(cards.flatMap((card) => card.tags))].sort((left, right) => left.localeCompare(right, "zh-CN")), [cards]);
   const visibleCards = useMemo(() => filterAndSortCards(cards.filter((card) => showArchived ? card.status === "archived" : card.status !== "archived"), learningByCardId, { query, track: selectedTrack, tags: selectedTags, sort, direction: sortDirection }), [cards, learningByCardId, query, selectedTrack, selectedTags, sort, sortDirection, showArchived]);
   const changeSort = (next: CardSort) => { setSort(next); setSortDirection(next === "review" || next === "difficulty" ? "asc" : "desc"); };
   const clearFilters = () => { setQuery(""); setSelectedTrack(""); setSelectedTags(new Set()); setSort("created"); setSortDirection("desc"); setShowArchived(false); };
+  const openWorkspace = (mode: "manual" | "import") => {
+    setNotice("");
+    setWorkspaceMode(mode);
+  };
+  const completeWorkspace = (message: string) => {
+    setWorkspaceMode(null);
+    setNotice(message);
+    void load();
+  };
   const completeCardSave = useCallback(() => {
     setEditingCard(null); setEditingDraft(null); setAiCandidates([]); setEditorSaveError(""); setEditorSaveState("idle"); setEditBusy(false);
   }, []);
@@ -305,8 +323,9 @@ export function CardLibrary() {
   };
 
   return <PageLayout className="cards-library-page">{detail && <CardDetailsDialog card={detail.card} relatedCards={detail.relatedCards} learning={detail.learning} onClose={() => setDetail(null)} />}{rarityPreviewOpen && <RarityPreviewDialog preset={stabilityRarityPreset} onClose={() => setRarityPreviewOpen(false)} />}{knowledgeExamplesOpen && <KnowledgeBaseExamplesDialog preset={stabilityRarityPreset} onClose={() => setKnowledgeExamplesOpen(false)} />}<LLMConfigurationDialog open={needsLLMConfiguration} onClose={() => setNeedsLLMConfiguration(false)} purpose="AI 补充问法" />
-    <PageHeader eyebrow={<><LibraryBig size={15}/> 卡片库</>} title="把积累的知识，随时翻出来练。" description="筛选、编辑或查看学习轨迹，让每一张卡片保持可用。" tour="library" actions={<><Button type="button" variant="secondary" onClick={() => setKnowledgeExamplesOpen(true)}><LayoutGrid size={17}/> 知识库示例</Button><Link href="/cards"><Button><FilePlus2 size={17}/> 创建或导入卡片</Button></Link></>} />
+    <PageHeader eyebrow={<><LibraryBig size={15}/> 卡片库</>} title="把积累的知识，随时翻出来练。" description="筛选、编辑或查看学习轨迹，让每一张卡片保持可用。" tour="library" actionRows={<div className="library-header-actions"><div className="library-header-action-row"><Button type="button" variant="secondary" onClick={() => setKnowledgeExamplesOpen(true)}><LayoutGrid size={17}/> 知识库示例</Button><TourButton tour="library" iconOnly /></div><div className="library-header-action-row"><Button type="button" onClick={() => openWorkspace("manual")} data-tour="library-create-card"><FilePlus2 size={17}/> 创建卡片</Button><div className="cards-import-actions"><Button type="button" variant="secondary" onClick={() => openWorkspace("import")}><FileSpreadsheet size={17}/> 导入卡片</Button><details className="template-download"><summary>下载模板文件</summary><div className="template-download-options"><p>CSV 模板中，其他问法、答案要点和回忆提示均可在同一单元格内换行；答案与提示会按行配对。</p><a href="/cards-import-template.md" download>Markdown 模板</a><a href="/cards-import-template.csv" download>CSV 模板（完整字段）</a></div></details></div></div></div>} />
     {notice && <div className="notice" role="status" style={{ marginBottom: 20 }}>{notice}</div>}
+    <div className={`library-workspace ${workspaceMode ? "open" : ""}`} aria-hidden={!workspaceMode}><div className="library-workspace-inner">{workspaceMode && <CardWorkspace key={workspaceMode} initialMode={workspaceMode} onClose={() => setWorkspaceMode(null)} onComplete={completeWorkspace} />}</div></div>
     {editingCard && editingDraft && <div className="card-editor-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeEditor(); }}><section className="card-editor-modal" role="dialog" aria-modal="true" aria-labelledby="card-editor-title" aria-busy={editorSaveState !== "idle"}>
       <div className="card-editor-content" inert={editorSaveState !== "idle"} aria-hidden={editorSaveState !== "idle"}>
         <div className="card-editor-heading"><div><p className="eyebrow"><PencilLine size={15}/> 编辑卡片</p><h2 id="card-editor-title">{editingDraft.question.trim() || "未命名问题"}</h2><p>修改内容不会重置已有的复习进度。</p></div><button className="icon-close" type="button" onClick={closeEditor} disabled={editBusy} aria-label="关闭编辑卡片"><X size={19}/></button></div>
@@ -334,7 +353,6 @@ export function CardLibrary() {
         const difficulty = difficultyTier(learning?.fsrsDifficulty);
         const rarity = stabilityRarityTier(learning?.fsrsStability, stabilityRarityPreset);
         const stability = learning?.fsrsStability ?? 0;
-        const isTutorialCard = card.id === tutorialCardId;
         const selectionMode = selectedIds.size > 0;
         const selected = selectedIds.has(card.id);
         return <KnowledgeCardFrame
@@ -342,6 +360,7 @@ export function CardLibrary() {
           key={card.id}
           ref={(node) => recommendationPreload.registerCard(card, node)}
           tilt
+          wrapContent={false}
           rarity={rarity.label}
           stability={stability}
           difficulty={difficulty && learning?.fsrsDifficulty !== null && learning?.fsrsDifficulty !== undefined ? { ...difficulty, value: learning.fsrsDifficulty } : null}
@@ -351,7 +370,7 @@ export function CardLibrary() {
           indicators={(card.note.trim() || card.answerPoints.some((item) => item.note.trim())) && <span className="note-count"><MessageSquareText size={14}/> 有批注</span>}
           title={<>{card.question}{card.questionVariants.length > 0 && <span className="variant-count"><Sparkles size={14}/> 另有 {card.questionVariants.length} 种问法</span>}</>}
           footer={<div className="card-library-actions">{showArchived ? <Button type="button" variant="ghost" className="card-icon-action" data-tooltip="恢复卡片" aria-label="恢复卡片" title="恢复卡片" onClick={() => void bulk("restore", undefined, [card.id])}><Undo2 size={18}/></Button> : <><Button type="button" variant="ghost" className="card-icon-action" data-tooltip="编辑卡片" aria-label="编辑卡片" title="编辑卡片" onClick={() => openCardEditor(card)}><PencilLine size={18}/></Button><Button type="button" variant="ghost" className="card-icon-action" data-tooltip={detailLoading === card.id ? "正在读取卡片详情" : "查看卡片详情"} aria-label={detailLoading === card.id ? "正在读取卡片详情" : "查看卡片详情"} title={detailLoading === card.id ? "正在读取卡片详情" : "查看卡片详情"} disabled={detailLoading === card.id} onClick={() => openCardDetails(card)}><MoreHorizontal size={20}/></Button><Button type="button" variant="ghost" className="card-icon-action" data-tooltip="归档卡片" aria-label="归档卡片" title="归档卡片" onClick={() => void bulk("archive", undefined, [card.id])}><Archive size={18}/></Button></>}</div>}
-          data-tour={isTutorialCard ? "tutorial-library-card" : "library-card"}
+          data-tour="library-card"
           tabIndex={selectionMode ? 0 : undefined}
           aria-label={selectionMode ? `${card.question}，${selected ? "已选择" : "未选择"}。按 Enter 或空格切换选择。` : undefined}
           onClick={(event) => selectFromCardSurface(event, card.id)}
@@ -370,10 +389,9 @@ export function CardLibrary() {
               <span><Clock3 size={14}/> 上次：{compactReviewTime(learning?.lastReviewAt)}</span>
             </div>
             <div className="card-meta"><Chip tone="blue">类型：{card.track}</Chip>{card.tags.map((tag) => <Chip key={tag} tone="ink">#{tag}</Chip>)}</div>
-            {isTutorialCard && <p className="tutorial-library-note">演示完成后可点击“归档”暂时收起；若不再需要，勾选后在批量栏选择“永久删除”，它会同时移除学习记录。</p>}
           </div>
         </KnowledgeCardFrame>;
-      })}</div> : <EmptyState title="没有符合条件的卡片" detail="换个关键词，或清除筛选条件再试试。" /> : <EmptyState title="你的题库还没有内容" detail="从一个你曾经答得不够顺的问题开始记录。" action={<Link href="/cards"><Button>创建第一张卡片</Button></Link>} />}
+      })}</div> : <EmptyState title="没有符合条件的卡片" detail="换个关键词，或清除筛选条件再试试。" /> : <EmptyState title="你的题库还没有内容" detail="从一个你曾经答得不够顺的问题开始记录。" action={<Button type="button" onClick={() => openWorkspace("manual")}>创建第一张卡片</Button>} />}
     </section>
   </PageLayout>;
 }

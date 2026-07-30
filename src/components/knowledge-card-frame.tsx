@@ -32,6 +32,7 @@ type KnowledgeCardFrameProps = Omit<ComponentPropsWithoutRef<"section">, "childr
   title: ReactNode;
   footer?: ReactNode;
   compact?: boolean;
+  wrapContent?: boolean;
   tilt?: boolean;
   onRarityClick?: () => void;
   rarityAriaLabel?: string;
@@ -47,6 +48,7 @@ export const KnowledgeCardFrame = forwardRef<HTMLElement, KnowledgeCardFrameProp
   title,
   footer,
   compact = false,
+  wrapContent = true,
   tilt = false,
   onRarityClick,
   rarityAriaLabel,
@@ -67,7 +69,7 @@ export const KnowledgeCardFrame = forwardRef<HTMLElement, KnowledgeCardFrameProp
       </div>
     </div>
     <h3>{title}</h3>
-    <div className="knowledge-card-scroll-content">{children}</div>
+    {wrapContent ? <div className="knowledge-card-scroll-content">{children}</div> : children}
     {footer}
   </Panel>;
 });

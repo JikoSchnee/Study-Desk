@@ -155,7 +155,7 @@ export default function ReviewPage() {
   const createSupplement = () => {
     if (!card || !evaluation) return;
     window.localStorage.setItem("mock-interview:supplement-draft", JSON.stringify({ question: `补充：${card.question}`, answerPoints: evaluation.gaps.length ? evaluation.gaps : ["补充这道题的关键要点"], track: card.track, tags: [...card.tags, "薄弱补充"] }));
-    router.push("/cards");
+    router.push("/library");
   };
 
   const generateFollowUp = async () => {
@@ -283,13 +283,13 @@ export default function ReviewPage() {
 
   if (card === undefined) return <div className="loading">正在准备下一道练习题…</div>;
 
-  if (!card && session === "random") return <PageLayout><PageHeader eyebrow={<><Dices size={15}/> 随机练习</>} title="题库还没有可抽取的卡片。" description="先创建一张卡片，把一个知识点练成能说出口的话。" tour="review" actions={<Button variant="secondary" onClick={leaveSession}>返回练习选择</Button>} /><EmptyState title="还没有可练习的卡片" detail="创建卡片后就可以随时随机抽题。" action={<Link href="/cards"><Button>去建立卡片</Button></Link>} /></PageLayout>;
+  if (!card && session === "random") return <PageLayout><PageHeader eyebrow={<><Dices size={15}/> 随机练习</>} title="题库还没有可抽取的卡片。" description="先创建一张卡片，把一个知识点练成能说出口的话。" tour="review" actions={<Button variant="secondary" onClick={leaveSession}>返回练习选择</Button>} /><EmptyState title="还没有可练习的卡片" detail="创建卡片后就可以随时随机抽题。" action={<Link href="/library"><Button>去建立卡片</Button></Link>} /></PageLayout>;
 
   if (!card && session !== null && session !== "random") {
     const other = session === "initial" ? "review" : session === "review" ? "initial" : null;
     const otherStats = other ? progress?.[other] ?? { pending: 0, completedToday: 0 } : { pending: 0, completedToday: 0 };
     const copy = queueCopy[session];
-    return <PageLayout><PageHeader eyebrow={<><BookOpenCheck size={15}/> {copy.label}</>} title={`${copy.label}已完成。`} description={`${progress ? `${progressText(progress[session])}。` : ""}${other && otherStats.pending ? ` 接下来还有 ${otherStats.pending} 道${queueCopy[other].label}。` : " 今天的练习告一段落。"}`} tour="review" actions={<Button variant="secondary" onClick={leaveSession}>返回练习选择</Button>} /><EmptyState title={other && otherStats.pending ? "继续下一类练习" : "今天的练习告一段落"} detail={other && otherStats.pending ? `确认后进入${queueCopy[other].label}，进度会继续累计。` : "明天再来复习，记忆会更牢。"} action={other && otherStats.pending ? <Button onClick={() => startQueue(other)}>继续{queueCopy[other].label}<ArrowRight size={17}/></Button> : <Link href="/cards"><Button>查看题库</Button></Link>} /></PageLayout>;
+    return <PageLayout><PageHeader eyebrow={<><BookOpenCheck size={15}/> {copy.label}</>} title={`${copy.label}已完成。`} description={`${progress ? `${progressText(progress[session])}。` : ""}${other && otherStats.pending ? ` 接下来还有 ${otherStats.pending} 道${queueCopy[other].label}。` : " 今天的练习告一段落。"}`} tour="review" actions={<Button variant="secondary" onClick={leaveSession}>返回练习选择</Button>} /><EmptyState title={other && otherStats.pending ? "继续下一类练习" : "今天的练习告一段落"} detail={other && otherStats.pending ? `确认后进入${queueCopy[other].label}，进度会继续累计。` : "明天再来复习，记忆会更牢。"} action={other && otherStats.pending ? <Button onClick={() => startQueue(other)}>继续{queueCopy[other].label}<ArrowRight size={17}/></Button> : <Link href="/library"><Button>查看题库</Button></Link>} /></PageLayout>;
   }
 
   const queue = session as SessionKind;
