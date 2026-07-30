@@ -4,10 +4,11 @@ import "@fontsource/nunito/700.css";
 import "@fontsource/nunito/800.css";
 import "@/app/globals.css";
 import { AppShell } from "@/components/app-shell";
+import { DesktopUpdateProvider } from "@/components/desktop-update-notice";
 import { TourProvider } from "@/components/tour";
 
 export const metadata: Metadata = { title: "八股训练台", description: "把知识沉淀成能说出口的答案" };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="zh-CN"><body><TourProvider><AppShell>{children}</AppShell></TourProvider></body></html>;
+  return <html lang="zh-CN"><body><TourProvider><DesktopUpdateProvider><AppShell>{children}</AppShell></DesktopUpdateProvider></TourProvider></body></html>;
 }
