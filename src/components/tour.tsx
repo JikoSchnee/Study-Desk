@@ -6,7 +6,7 @@ import { Compass, X } from "lucide-react";
 import { Button } from "@/components/ui";
 
 type Step = { selector: string; title: string; detail: string };
-export type TourId = "today" | "cards" | "library" | "review" | "interview" | "knowledge" | "settings";
+export type TourId = "today" | "cards" | "library" | "review" | "interview" | "knowledge";
 
 const tours: Record<TourId, Step[]> = {
   today: [
@@ -32,7 +32,6 @@ const tours: Record<TourId, Step[]> = {
   ],
   interview: [{ selector: '[data-tour="interview-start"]', title: "开始模拟", detail: "问题来自你的卡片，回答会被记录到本场报告。" }, { selector: '[data-tour="interview-followup"]', title: "AI 拓展追问", detail: "完成原题后可让 LLM 针对回答生成一条追问；报告会清晰标注。" }, { selector: '[data-tour="interview-report"]', title: "复盘报告", detail: "模拟结束后查看逐题反馈和遗漏要点，把薄弱点带回训练。" }],
   knowledge: [{ selector: '[data-tour="knowledge-analysis"]', title: "分析建议", detail: "应用根据你的卡片生成需要补充或维护的知识库建议。" }, { selector: '[data-tour="knowledge-review"]', title: "审核后手动修改", detail: "先确认，再复制到 Obsidian 手动修改；应用不会写入原笔记。" }],
-  settings: [{ selector: '[data-tour="settings-goals"]', title: "每日训练目标", detail: "设置每日首次学习和到期复习数量；超过目标仍可继续练习。" }, { selector: '[data-tour="settings-model"]', title: "模型服务", detail: "在本机保存模型连接配置；密钥不会显示在页面上。" }, { selector: '[data-tour="settings-experimental"]', title: "测试功能", detail: "模拟面试与知识库仍在开发中；可从这里进入并体验当前版本。" }, { selector: '[data-tour="settings-backup"]', title: "备份与迁移", detail: "下载 JSON 备份，或在新设备预览后合并、替换恢复。" }],
 };
 
 type TourContextValue = { startTour: (id: TourId) => void; activeId: TourId | null };

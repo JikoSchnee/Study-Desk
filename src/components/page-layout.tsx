@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { TourButton, type TourId } from "@/components/tour";
 
-type PageTour = Exclude<TourId, "today" | "settings">;
+type PageTour = Exclude<TourId, "today">;
 
 export function PageLayout({ children, className = "" }: { children: ReactNode; className?: string }) {
   return <div className={`page-layout ${className}`.trim()}>{children}</div>;

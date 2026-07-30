@@ -4,7 +4,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { BookOpenCheck, ClipboardList, LibraryBig, Maximize2, Minimize2, Settings, Square, X } from "lucide-react";
-import { TourButton } from "@/components/tour";
 import { SemanticModelPrewarm } from "@/components/semantic-model-prewarm";
 import { DesktopUpdatePrompt } from "@/components/desktop-updater";
 
@@ -49,7 +48,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <p className="nav-note">每天把一个知识点，练成一句能说清的话。</p>
     </aside>
     <main className="page-main" data-tour="page-main">{children}</main>
-    {pathname === "/settings" && <div className="page-tour-fab"><TourButton tour="settings" /></div>}
     <nav className="bottom-nav" aria-label="移动端主导航">{nav.map(([href, label, Icon]) => <Link key={href} href={href} data-tour={tourTargetForNav(href)} className={pathname === href ? "active" : ""}><Icon size={20}/><span>{label}</span></Link>)}</nav>
   </div>;
 }
