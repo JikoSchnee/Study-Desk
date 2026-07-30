@@ -1,6 +1,6 @@
 {
   "name": "mock-interview",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "本地优先的面试知识训练桌面应用",
   "author": "JikoSchnee",
   "private": true,
@@ -74,7 +74,9 @@
       {
         "from": ".next/standalone/node_modules",
         "to": "next/node_modules",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": ".next/static",
