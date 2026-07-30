@@ -9,7 +9,7 @@ type Embedder = (values: string[]) => Promise<number[][]>;
 
 let embedderPromise: Promise<Embedder> | null = null;
 const LOCAL_EMBEDDING_MODEL = "Xenova/bge-m3";
-const EMBEDDING_CACHE_DIR = join(process.cwd(), ".cache", "answer-comparison");
+const EMBEDDING_CACHE_DIR = join(process.env.MOCK_INTERVIEW_HOME || process.cwd(), ".cache", "answer-comparison");
 const EMBEDDING_MODEL_DIR = join(EMBEDDING_CACHE_DIR, "Xenova", "bge-m3");
 const MODEL_FILE = join(EMBEDDING_MODEL_DIR, "onnx", "model_quantized.onnx");
 const MODEL_PART_FILE = `${MODEL_FILE}.part`;

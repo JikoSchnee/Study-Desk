@@ -3,7 +3,8 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isModelProviderId, resolveModelProviderSettings, type ModelProviderId } from "@/lib/model-providers";
 
-const ENVIRONMENT_FILE = join(process.cwd(), ".env.local");
+// Keep credentials next to the desktop user's data rather than inside a signed app bundle.
+const ENVIRONMENT_FILE = join(process.env.MOCK_INTERVIEW_HOME || process.cwd(), ".env.local");
 const managedKeys = ["LLM_PROVIDER", "LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL"] as const;
 type ManagedKey = (typeof managedKeys)[number];
 type EnvironmentValues = Partial<Record<ManagedKey, string>>;

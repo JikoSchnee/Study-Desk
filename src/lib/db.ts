@@ -3,7 +3,9 @@ import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-const dataDir = join(process.cwd(), "data");
+// The desktop shell sets MOCK_INTERVIEW_HOME to Electron's user-data directory.
+// Browser development keeps the existing project-local data directory unchanged.
+const dataDir = join(process.env.MOCK_INTERVIEW_HOME || process.cwd(), "data");
 mkdirSync(dataDir, { recursive: true });
 
 const globalForDb = globalThis as unknown as { mockInterviewDb?: Database.Database };

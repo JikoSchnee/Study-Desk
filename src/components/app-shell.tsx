@@ -2,23 +2,20 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
-import { BookOpenCheck, ClipboardList, FilePlus2, LibraryBig, Menu, Mic2, Settings, Sparkles, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { BookOpenCheck, ClipboardList, LibraryBig, Maximize2, Minimize2, Settings, Square, X } from "lucide-react";
 import { TourButton } from "@/components/tour";
 import { SemanticModelPrewarm } from "@/components/semantic-model-prewarm";
+import { DesktopUpdatePrompt } from "@/components/desktop-updater";
 
 const nav = [
   ["/", "今日", ClipboardList],
-  ["/cards", "录入", FilePlus2],
   ["/library", "卡片库", LibraryBig],
   ["/review", "学习", BookOpenCheck],
-  ["/interview", "面试", Mic2],
-  ["/knowledge-base", "知识库", Sparkles],
   ["/settings", "设置", Settings],
 ] as const;
 
 function tourTargetForNav(href: string) {
-  if (href === "/cards") return "nav-cards";
   if (href === "/review") return "nav-review";
   if (href === "/library") return "nav-library";
   return undefined;
@@ -26,9 +23,26 @@ function tourTargetForNav(href: string) {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const [moreOpen, setMoreOpen] = useState(false);
-  return <div className="app-frame">
+  const isWindowsDesktop = typeof window !== "undefined" && window.mockInterviewDesktop?.platform === "win32";
+  const [maximized, setMaximized] = useState(false);
+
+  useEffect(() => {
+    if (!isWindowsDesktop) return;
+    void window.mockInterviewDesktop?.window.isMaximized().then(setMaximized);
+    return window.mockInterviewDesktop?.window.onMaximizeChange(setMaximized);
+  }, [isWindowsDesktop]);
+
+  return <div className={isWindowsDesktop ? "app-frame desktop-windows" : "app-frame"}>
     <SemanticModelPrewarm />
+    <DesktopUpdatePrompt />
+    {isWindowsDesktop && <header className="windows-titlebar" aria-label="窗口控制区">
+      <div className="windows-drag-region" />
+      <div className="windows-controls" aria-label="窗口控制">
+        <button type="button" className="window-control minimize" aria-label="最小化窗口" title="最小化" onClick={() => void window.mockInterviewDesktop?.window.minimize()}><Minimize2 size={16} strokeWidth={2.8}/></button>
+        <button type="button" className="window-control maximize" aria-label={maximized ? "还原窗口" : "最大化窗口"} title={maximized ? "还原" : "最大化"} onClick={() => void window.mockInterviewDesktop?.window.toggleMaximize()}>{maximized ? <Square size={14} strokeWidth={2.8}/> : <Maximize2 size={16} strokeWidth={2.8}/>}</button>
+        <button type="button" className="window-control close" aria-label="关闭窗口" title="关闭" onClick={() => void window.mockInterviewDesktop?.window.close()}><X size={17} strokeWidth={3}/></button>
+      </div>
+    </header>}
     <aside className="side-nav" aria-label="主导航">
       <Link href="/" className="brand"><span>八</span><b>八股训练台</b></Link>
       <nav>{nav.map(([href, label, Icon]) => <Link key={href} href={href} data-tour={tourTargetForNav(href)} className={pathname === href ? "nav-item active" : "nav-item"}><Icon size={20} /><span>{label}</span></Link>)}</nav>
@@ -36,7 +50,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     </aside>
     <main className="page-main" data-tour="page-main">{children}</main>
     {pathname === "/settings" && <div className="page-tour-fab"><TourButton tour="settings" /></div>}
-    <nav className="bottom-nav" aria-label="移动端主导航">{nav.slice(0, 5).map(([href, label, Icon]) => <Link key={href} href={href} data-tour={tourTargetForNav(href)} className={pathname === href ? "active" : ""}><Icon size={20}/><span>{label}</span></Link>)}<button type="button" className={moreOpen || pathname === "/knowledge-base" || pathname === "/settings" ? "active" : ""} onClick={() => setMoreOpen(true)}><Menu size={20}/><span>更多</span></button></nav>
-    {moreOpen && <div className="more-nav-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setMoreOpen(false); }}><section className="more-nav-sheet" role="dialog" aria-modal="true" aria-label="更多功能"><button className="icon-close" type="button" aria-label="关闭更多功能" onClick={() => setMoreOpen(false)}><X size={19}/></button><p className="eyebrow">更多功能</p>{nav.slice(5).map(([href, label, Icon]) => <Link href={href} key={href} onClick={() => setMoreOpen(false)}><Icon size={19}/>{label}</Link>)}</section></div>}
+    <nav className="bottom-nav" aria-label="移动端主导航">{nav.map(([href, label, Icon]) => <Link key={href} href={href} data-tour={tourTargetForNav(href)} className={pathname === href ? "active" : ""}><Icon size={20}/><span>{label}</span></Link>)}</nav>
   </div>;
 }

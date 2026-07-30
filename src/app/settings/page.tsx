@@ -1,8 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Download, KeyRound, Save, ShieldCheck, SlidersHorizontal, Sparkles, Upload } from "lucide-react";
+import { Download, FlaskConical, KeyRound, Mic2, Save, ShieldCheck, SlidersHorizontal, Sparkles, Upload } from "lucide-react";
 import { Button, Panel } from "@/components/ui";
+import { DesktopUpdater } from "@/components/desktop-updater";
 import { rarityPresetOptions, type StabilityRarityPreset } from "@/lib/card-tiers";
 import { modelProviders, type ModelProviderId } from "@/lib/model-providers";
 import type { AnswerComparisonMode } from "@/lib/types";
@@ -137,6 +139,8 @@ export default function SettingsPage() {
         <p className="environment-security"><ShieldCheck size={16}/> 密钥不会从服务器回传到浏览器；同一服务留空可保留已有密钥。</p>{provider === "claude" && <p className="provider-note">Claude 选项使用 Anthropic API Key；Claude Code 的订阅登录不能替代 API Key。</p>}{environmentNotice && <p className="muted-copy" role="status">{environmentNotice}</p>}
       </Panel>
     </div>
+    <Panel className="test-features-panel" data-tour="settings-experimental"><p className="eyebrow"><FlaskConical size={15}/> 测试功能</p><h2>开发中的功能</h2><p className="muted-copy">以下功能仍在开发中，可能会调整或不稳定。</p><div className="test-feature-actions"><Link className="button secondary" href="/interview"><Mic2 size={17}/> 进入模拟面试</Link><Link className="button outline" href="/knowledge-base"><Sparkles size={17}/> 进入知识库</Link></div></Panel>
+    <DesktopUpdater />
     <Panel className="backup-panel" data-tour="settings-backup"><p className="eyebrow"><ShieldCheck size={15}/> 备份与迁移</p><h2>带走你的训练记录</h2><p className="muted-copy">备份包含卡片、复习、面试、任务和普通设置；不包含 API Key 或本地模型配置。</p><div className="form-actions"><Button type="button" variant="secondary" onClick={downloadBackup}><Download size={17}/> 下载 JSON 备份</Button><label className="button ghost"><Upload size={17}/> 选择备份恢复<input hidden type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void inspectBackup(file); event.target.value = ""; }} /></label></div>{backupPreview && <div className="backup-preview"><strong>已验证备份</strong><span>{Object.entries(backupPreview.counts).map(([key, count]) => `${key} ${count}`).join(" · ")}</span><span>卡片 ID 冲突：{backupPreview.cardConflicts}</span><div className="form-actions"><Button type="button" onClick={() => restoreBackup("merge")}>合并恢复</Button><Button type="button" variant="warning" onClick={() => restoreBackup("replace")}>下载当前备份并替换</Button></div></div>}{backupNotice && <p className="muted-copy" role="status">{backupNotice}</p>}</Panel>
   </>;
 }
