@@ -34,6 +34,7 @@
     "recharts": "^3.10.1",
     "ts-fsrs": "^5.2.3",
     "xlsx": "^0.18.5",
+    "yauzl": "^3.4.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
@@ -42,6 +43,7 @@
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.3",
     "@types/react-dom": "^19.0.2",
+    "@types/yauzl": "^2.10.3",
     "drizzle-kit": "^0.31.4",
     "electron": "^43.2.0",
     "electron-builder": "^26.15.3",

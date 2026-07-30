@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compareLexically, comparisonFromLLM, evaluationFromComparison } from "./answer-comparison";
+import { compareLexically, comparisonFromLLM, evaluationFromComparison, importedModelArchiveRequirements, requiredModelFilesInArchive } from "./answer-comparison";
 import type { Card } from "./types";
 
 const card: Card = {
@@ -10,6 +10,18 @@ const card: Card = {
 };
 
 describe("answer comparison", () => {
+  it("accepts the complete bge-m3 archive layout with an optional top-level directory", () => {
+    const paths = importedModelArchiveRequirements().map((path) => `Xenova-bge-m3/${path}`);
+    expect([...requiredModelFilesInArchive(paths).keys()]).toEqual(importedModelArchiveRequirements());
+  });
+
+  it("rejects incomplete, duplicate, or unsafe bge-m3 archives before extracting files", () => {
+    const complete = importedModelArchiveRequirements();
+    expect(() => requiredModelFilesInArchive(complete.filter((path) => path !== "tokenizer.json"))).toThrow("tokenizer.json");
+    expect(() => requiredModelFilesInArchive([...complete, "copy/config.json"])).toThrow("重复");
+    expect(() => requiredModelFilesInArchive([...complete, "../unsafe.txt"])).toThrow("不安全");
+  });
+
   it("maps exact local wording to its answer point and leaves unrelated points missing", () => {
     const comparison = compareLexically(card, "我会先检索候选资料，再说明业务背景。");
     expect(comparison.source).toBe("lexical");

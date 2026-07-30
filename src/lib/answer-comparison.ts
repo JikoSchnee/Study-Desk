@@ -1,8 +1,12 @@
 import "server-only";
-import { access, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { createWriteStream } from "node:fs";
 import { join } from "node:path";
+import { finished } from "node:stream/promises";
+import yauzl, { type Entry as ZipEntry, type ZipFile } from "yauzl";
 import type { AnswerComparison, AnswerComparisonMode, AnswerEvidence, AnswerPointComparison, AnswerPointRole, Card } from "@/lib/types";
 import { setComparisonProgress } from "@/lib/comparison-progress";
+import { getAppSettings } from "@/lib/settings";
 
 type Segment = { text: string; start: number; end: number };
 type Embedder = (values: string[]) => Promise<number[][]>;
@@ -17,9 +21,11 @@ const MODEL_READY_FILE = join(EMBEDDING_MODEL_DIR, ".complete.json");
 const MODEL_DOWNLOAD_URL = "https://huggingface.co/Xenova/bge-m3/resolve/main/onnx/model_quantized.onnx?download=true";
 const MIN_MODEL_BYTES = 500 * 1024 * 1024;
 const MAX_DOWNLOAD_RETRIES = 3;
+export const LOCAL_EMBEDDING_MODEL_ARCHIVE_MAX_BYTES = 800 * 1024 * 1024;
+const LOCAL_MODEL_REQUIRED_FILES = ["config.json", "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json", "sentencepiece.bpe.model", "onnx/model_quantized.onnx"] as const;
 
 export type LocalEmbeddingModelStatus = {
-  state: "pending" | "downloading" | "verifying" | "retrying" | "ready" | "error";
+  state: "pending" | "downloading" | "verifying" | "retrying" | "importing" | "ready" | "error";
   onnxState: "pending" | "parsing" | "ready" | "failed";
   downloadedBytes: number;
   totalBytes: number | null;
@@ -29,6 +35,8 @@ export type LocalEmbeddingModelStatus = {
 
 let downloadStatus: LocalEmbeddingModelStatus = { state: "pending", onnxState: "pending", downloadedBytes: 0, totalBytes: null, attempt: 0 };
 let preparationPromise: Promise<void> | null = null;
+
+export function importedModelArchiveRequirements() { return [...LOCAL_MODEL_REQUIRED_FILES]; }
 
 function cleanSegment(raw: string, index: number) {
   const leading = raw.length - raw.trimStart().length;
@@ -152,8 +160,15 @@ async function sizeOf(path: string) {
   catch { return 0; }
 }
 
+async function hasCompleteLocalModelPackage(directory = EMBEDDING_MODEL_DIR) {
+  for (const file of LOCAL_MODEL_REQUIRED_FILES) {
+    if (!await exists(join(directory, file))) return false;
+  }
+  return await sizeOf(join(directory, "onnx", "model_quantized.onnx")) >= MIN_MODEL_BYTES;
+}
+
 async function isModelReady() {
-  if (!await exists(MODEL_READY_FILE) || await sizeOf(MODEL_FILE) < MIN_MODEL_BYTES) return false;
+  if (!await exists(MODEL_READY_FILE) || !await hasCompleteLocalModelPackage()) return false;
   try {
     const marker = JSON.parse(await readFile(MODEL_READY_FILE, "utf8")) as { model?: string };
     return marker.model === LOCAL_EMBEDDING_MODEL;
@@ -161,7 +176,109 @@ async function isModelReady() {
 }
 
 async function markModelReady() {
-  await writeFile(MODEL_READY_FILE, JSON.stringify({ model: LOCAL_EMBEDDING_MODEL, completedAt: new Date().toISOString() }), "utf8");
+  await writeFile(MODEL_READY_FILE, JSON.stringify({ model: LOCAL_EMBEDDING_MODEL, completedAt: new Date().toISOString(), offline: await hasCompleteLocalModelPackage() }), "utf8");
+}
+
+function archivePath(path: string) {
+  const normalized = path.replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/$/, "");
+  if (!normalized || normalized.startsWith("/") || normalized.split("/").some((part) => !part || part === "." || part === "..")) throw new Error("压缩包包含不安全的文件路径。");
+  return normalized;
+}
+
+export function requiredModelFilesInArchive(paths: string[]) {
+  const normalized = paths.map(archivePath);
+  const matches = new Map<string, string>();
+  for (const required of LOCAL_MODEL_REQUIRED_FILES) {
+    const candidates = normalized.filter((path) => path === required || path.endsWith(`/${required}`));
+    if (candidates.length !== 1) throw new Error(`模型压缩包缺少或重复包含 ${required}。`);
+    matches.set(required, candidates[0]);
+  }
+  const prefixes = new Set([...matches.entries()].map(([required, path]) => path.slice(0, -required.length)));
+  if (prefixes.size !== 1) throw new Error("模型文件必须位于同一个顶层目录中。");
+  return matches;
+}
+
+function openArchive(path: string) {
+  return new Promise<ZipFile>((resolve, reject) => yauzl.open(path, { autoClose: false, lazyEntries: true, strictFileNames: true, validateEntrySizes: true }, (error, archive) => error || !archive ? reject(error ?? new Error("无法读取模型压缩包。")) : resolve(archive)));
+}
+
+function listArchiveEntries(archive: ZipFile) {
+  return new Promise<ZipEntry[]>((resolve, reject) => {
+    const entries: ZipEntry[] = [];
+    archive.once("error", reject);
+    archive.on("entry", (entry: ZipEntry) => { entries.push(entry); archive.readEntry(); });
+    archive.once("end", () => resolve(entries));
+    archive.readEntry();
+  });
+}
+
+function archiveEntryStream(archive: ZipFile, entry: ZipEntry) {
+  return new Promise<NodeJS.ReadableStream>((resolve, reject) => archive.openReadStream(entry, (error, stream) => error || !stream ? reject(error ?? new Error(`无法读取 ${entry.fileName}。`)) : resolve(stream)));
+}
+
+/** Safely installs a complete Xenova/bge-m3 archive without replacing a working cache on failure. */
+export async function importLocalEmbeddingModelArchive(archivePathname: string) {
+  if (preparationPromise) throw new Error("本地模型正在下载或验证，请完成后再导入。");
+  const archiveSize = await sizeOf(archivePathname);
+  if (!archiveSize) throw new Error("未读取到模型压缩包。");
+  if (archiveSize > LOCAL_EMBEDDING_MODEL_ARCHIVE_MAX_BYTES) throw new Error("模型压缩包超过 800MB 限制。");
+
+  downloadStatus = { state: "importing", onnxState: "pending", downloadedBytes: 0, totalBytes: archiveSize, attempt: 0 };
+  let stagingRoot = "";
+  let openedArchive: ZipFile | null = null;
+  try {
+    const archive = await openArchive(archivePathname);
+    openedArchive = archive;
+    const entries = await listArchiveEntries(archive);
+    for (const entry of entries) archivePath(entry.fileName);
+    const files = entries.filter((entry) => !entry.fileName.endsWith("/"));
+    const totalUncompressed = files.reduce((sum, entry) => sum + entry.uncompressedSize, 0);
+    if (totalUncompressed > LOCAL_EMBEDDING_MODEL_ARCHIVE_MAX_BYTES) throw new Error("模型压缩包解压后的内容超过 800MB 限制。");
+    const required = requiredModelFilesInArchive(files.map((entry) => entry.fileName));
+    const modelEntry = files.find((entry) => entry.fileName === required.get("onnx/model_quantized.onnx"));
+    if (!modelEntry || modelEntry.uncompressedSize < MIN_MODEL_BYTES) throw new Error("model_quantized.onnx 不完整或不是当前支持的量化模型。");
+
+    await mkdir(EMBEDDING_CACHE_DIR, { recursive: true });
+    stagingRoot = await mkdtemp(join(EMBEDDING_CACHE_DIR, ".bge-m3-import-"));
+    const stagingModelDir = join(stagingRoot, "Xenova", "bge-m3");
+    for (const [requiredPath, sourcePath] of required) {
+      const entry = files.find((item) => item.fileName === sourcePath);
+      if (!entry) throw new Error(`无法读取 ${requiredPath}。`);
+      const destination = join(stagingModelDir, requiredPath);
+      await mkdir(join(destination, ".."), { recursive: true });
+      const output = createWriteStream(destination, { flags: "wx" });
+      const source = await archiveEntryStream(archive, entry);
+      await finished(source.pipe(output));
+    }
+    for (const config of ["config.json", "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json"] as const) {
+      try { JSON.parse(await readFile(join(stagingModelDir, config), "utf8")); }
+      catch { throw new Error(`${config} 不是有效的 JSON 配置文件。`); }
+    }
+    if (!await hasCompleteLocalModelPackage(stagingModelDir)) throw new Error("导入的模型文件不完整。");
+
+    const previousDir = `${EMBEDDING_MODEL_DIR}.previous`;
+    await rm(previousDir, { recursive: true, force: true });
+    if (await exists(EMBEDDING_MODEL_DIR)) await rename(EMBEDDING_MODEL_DIR, previousDir);
+    try {
+      await rename(stagingModelDir, EMBEDDING_MODEL_DIR);
+      embedderPromise = null;
+      await getEmbedder();
+      await markModelReady();
+      await rm(previousDir, { recursive: true, force: true });
+    } catch (error) {
+      await rm(EMBEDDING_MODEL_DIR, { recursive: true, force: true });
+      if (await exists(previousDir)) await rename(previousDir, EMBEDDING_MODEL_DIR);
+      throw error;
+    }
+    const modelBytes = await sizeOf(MODEL_FILE);
+    downloadStatus = { state: "ready", onnxState: "ready", downloadedBytes: modelBytes, totalBytes: modelBytes, attempt: 0 };
+  } catch (error) {
+    downloadStatus = { state: "error", onnxState: "failed", downloadedBytes: 0, totalBytes: null, attempt: 0, error: error instanceof Error ? error.message : "导入 bge-m3 失败。" };
+    throw error;
+  } finally {
+    openedArchive?.close();
+    if (stagingRoot) await rm(stagingRoot, { recursive: true, force: true });
+  }
 }
 
 async function clearModelCache() {
@@ -240,6 +357,7 @@ async function ensureModelFile() {
 
 /** Starts a detached, resumable download. Concurrent calls share one job. */
 export function startLocalEmbeddingModelPrewarm() {
+  if (getAppSettings().embeddingModelSource === "offline") return;
   if (preparationPromise) return;
   preparationPromise = (async () => {
     if (await isModelReady()) {
@@ -294,10 +412,16 @@ async function getEmbedder(progressId?: string): Promise<Embedder> {
       setComparisonProgress(progressId, { percent: 12, stage: "preparing", message: "正在检查本地语义模型…" });
       const { env, pipeline } = await import("@huggingface/transformers");
       env.cacheDir = EMBEDDING_CACHE_DIR;
+      env.localModelPath = EMBEDDING_CACHE_DIR;
+      const localOnly = await hasCompleteLocalModelPackage();
+      const offlineOnly = getAppSettings().embeddingModelSource === "offline";
+      if (offlineOnly && !localOnly) throw new Error("离线导入模式尚未导入完整的 bge-m3 模型。");
+      env.allowRemoteModels = !offlineOnly && !localOnly;
       await ensureModelFile();
       downloadStatus = { ...downloadStatus, state: "verifying", onnxState: "parsing", downloadedBytes: await sizeOf(MODEL_FILE), totalBytes: await sizeOf(MODEL_FILE) };
       const extractor = await pipeline("feature-extraction", LOCAL_EMBEDDING_MODEL, {
         dtype: "q8",
+        local_files_only: localOnly,
         progress_callback: (event: unknown) => {
           const update = event as { status?: string; progress?: number; file?: string };
           const raw = Number(update.progress);

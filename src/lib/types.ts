@@ -3,6 +3,7 @@ export type TaskKind = "review" | "learn" | "interview" | "knowledge";
 export type TaskStatus = "todo" | "done" | "skipped";
 export type RatingName = "again" | "hard" | "good" | "easy";
 export type AnswerComparisonMode = "embedding" | "llm";
+export type EmbeddingModelSource = "automatic" | "offline";
 export type TagDisplayLanguage = "zh" | "en" | "both";
 
 export interface Tag {
