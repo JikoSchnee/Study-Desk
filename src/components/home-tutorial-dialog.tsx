@@ -19,7 +19,7 @@ function StepPreview({ step, animationKey }: { step: TutorialStepId; animationKe
       <div className="mini-window-bar"><span /><span /><span /><b>创建卡片</b></div>
       <div className="mini-form-row"><i>问题</i><strong>什么是 JVM 内存模型？</strong></div>
       <div className="mini-answer-points"><span><b>1</b><i /></span><span><b>2</b><i /></span><span><b>3</b><i /></span></div>
-      <div className="mini-save"><Check size={14} strokeWidth={3} /> 保存并加入学习</div>
+      <div className="mini-save"><Check size={14} strokeWidth={3} /> 保存</div>
       <div className="mini-pencil"><PencilLine size={20} /></div>
     </div>}
     {step === "batch" && <div className="mini-window mini-batch">
