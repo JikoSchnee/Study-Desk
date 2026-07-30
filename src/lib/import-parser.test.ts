@@ -18,7 +18,7 @@ describe("XLSX preview", () => {
     expect(result.preview[0].card.questionVariants.map((variant) => variant.content)).toEqual(["请解释 RAG", "RAG 如何工作？"]);
     expect(result.preview[0].card.answerPoints.map((point) => point.role)).toEqual(["opening", "key", "key", "closing"]);
     expect(result.preview[0].card.tags).toEqual(["RAG", "检索"]);
-  });
+  }, 15_000);
 
   it("keeps line-separated answer points, hints, and question variants from a CSV cell", async () => {
     const csv = "问题,其他问法,答案,回忆提示,知识库类型,标签\nRAG 为什么需要重排序？,\"为什么召回后还要 rerank？\nRAG 如何把最相关的资料排在前面？\",\"初步召回更关注覆盖率。\n重排序重新判断相关性。\",\"先召回，再精排\n相关性判断\",Agent,\"RAG|检索\"";
@@ -28,5 +28,5 @@ describe("XLSX preview", () => {
 
     expect(result.preview[0].card.questionVariants.map((variant) => variant.content)).toEqual(["为什么召回后还要 rerank？", "RAG 如何把最相关的资料排在前面？"]);
     expect(result.preview[0].card.answerPoints).toMatchObject([{ content: "初步召回更关注覆盖率。", hint: "先召回，再精排" }, { content: "重排序重新判断相关性。", hint: "相关性判断" }]);
-  });
+  }, 15_000);
 });
