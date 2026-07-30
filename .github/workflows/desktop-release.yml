@@ -49,6 +49,10 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      - name: Verify macOS update asset
+        shell: bash
+        run: |
+          node -e "const fs=require('fs'); const manifest=fs.readFileSync('release/latest-mac.yml','utf8'); const match=manifest.match(/^path:\\s*(.+)$/m); if (!match) throw new Error('latest-mac.yml does not contain an update path'); const asset=match[1].trim().replace(/^['\"]|['\"]$/g,''); if (!fs.existsSync('release/' + asset)) throw new Error('Missing macOS update asset: ' + asset); console.log('Verified macOS update asset:', asset);"
       - uses: actions/upload-artifact@v4
         with:
           name: macos-release
