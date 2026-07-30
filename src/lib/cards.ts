@@ -114,7 +114,7 @@ export function updateCard(id: string, input: Pick<Card, "question" | "questionV
   const collision = findQuestionCollision(question, questionVariants, existingQuestionTexts(id));
   if (collision && card.source !== "tutorial") throw new Error(`问法“${collision}”已存在于其他卡片。`);
   sqlite.prepare("UPDATE cards SET question = ?, question_variants = ?, answer = ?, answer_points = ?, note = ?, track = ?, tags = ?, difficulty = ?, updated_at = ? WHERE id = ?")
-    .run(question, questionVariantsToJson(question, questionVariants), answerFromPoints(answerPoints), input.note.trim(), input.track, toTags(resolveTagKeys(input.tags)), input.difficulty, new Date().toISOString(), id);
+    .run(question, questionVariantsToJson(question, questionVariants), answerFromPoints(answerPoints), answerPointsToJson(answerPoints), input.note.trim(), input.track, toTags(resolveTagKeys(input.tags)), input.difficulty, new Date().toISOString(), id);
   replaceCardRelations(id, relations);
   return getCard(id);
 }
