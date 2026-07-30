@@ -32,7 +32,11 @@ export async function findSimilarImportQuestions(rows: ImportQuestion[], existin
     .map((text) => ({ text, question: card.question, score: 0, cardId: card.id, source: "library" as const })));
   const incoming: Candidate[] = rows.flatMap((row, importIndex) => questionTexts(row)
     .map((text) => ({ text, question: row.question.trim(), score: 0, source: "import" as const, importIndex })));
-  if (!incoming.length || (candidates.length === 0 && incoming.length < 2)) return new Map<number, SimilarImportMatch>();
+  // Variants create multiple input texts, but they all belong to the same row
+  // and are intentionally excluded from comparison with one another. Do not
+  // initialize the local embedding model unless there is at least one eligible
+  // peer: an existing card or an earlier import row.
+  if (!incoming.length || (candidates.length === 0 && rows.length < 2)) return new Map<number, SimilarImportMatch>();
 
   try {
     const vectors = await embedTexts([...candidates.map((candidate) => candidate.text), ...incoming.map((candidate) => candidate.text)]);
