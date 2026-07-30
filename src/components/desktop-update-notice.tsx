@@ -7,6 +7,7 @@ export type UpdateCheckResult = { state: "current"; currentVersion: string; late
 
 type DesktopUpdateContextValue = { updateResult: UpdateCheckResult | null; setUpdateResult(result: UpdateCheckResult | null): void; lastCheckedAt: Date | null; setLastCheckedAt(date: Date | null): void; dismissUpdate(): void };
 const DesktopUpdateContext = createContext<DesktopUpdateContextValue | null>(null);
+const updateStatusStorageKey = "study-desk.update-status";
 const releaseNoteTags = new Set(["a", "b", "blockquote", "br", "code", "del", "details", "div", "em", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "i", "li", "ol", "p", "pre", "small", "span", "strong", "summary", "table", "tbody", "td", "th", "thead", "tr", "u", "ul"]);
 
 function isHtmlReleaseNotes(notes: string) { return /<\/?[a-z][^>]*>/i.test(notes); }
@@ -39,7 +40,30 @@ export function ReleaseNotes({ notes }: { notes: string }) {
 export function DesktopUpdateProvider({ children }: { children: React.ReactNode }) {
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
   const [lastCheckedAt, setLastCheckedAt] = useState<Date | null>(null);
+  const [storageLoaded, setStorageLoaded] = useState(false);
+
   useEffect(() => {
+    try {
+      const saved = JSON.parse(window.sessionStorage.getItem(updateStatusStorageKey) ?? "null") as { updateResult?: UpdateCheckResult; lastCheckedAt?: string } | null;
+      if (saved?.updateResult) setUpdateResult(saved.updateResult);
+      if (saved?.lastCheckedAt) {
+        const date = new Date(saved.lastCheckedAt);
+        if (!Number.isNaN(date.getTime())) setLastCheckedAt(date);
+      }
+    } catch { /* A missing or malformed saved status should not block update checks. */ }
+    setStorageLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!storageLoaded) return;
+    try {
+      if (!updateResult) window.sessionStorage.removeItem(updateStatusStorageKey);
+      else window.sessionStorage.setItem(updateStatusStorageKey, JSON.stringify({ updateResult, lastCheckedAt: lastCheckedAt?.toISOString() }));
+    } catch { /* Storage may be unavailable in a restricted browser context. */ }
+  }, [lastCheckedAt, storageLoaded, updateResult]);
+
+  useEffect(() => {
+    if (!storageLoaded) return;
     let active = true;
     const checkForUpdates = async () => {
       if (!window.mockInterviewDesktop) return;
@@ -54,8 +78,8 @@ export function DesktopUpdateProvider({ children }: { children: React.ReactNode 
     };
     void checkForUpdates();
     return () => { active = false; };
-  }, []);
-  const dismissUpdate = () => setUpdateResult(null);
+  }, [storageLoaded]);
+  const dismissUpdate = () => { setUpdateResult(null); setLastCheckedAt(null); };
   return <DesktopUpdateContext.Provider value={{ updateResult, setUpdateResult, lastCheckedAt, setLastCheckedAt, dismissUpdate }}>{children}</DesktopUpdateContext.Provider>;
 }
 
