@@ -37,7 +37,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 
 .app-frame { min-height: 100vh; display: grid; grid-template-columns: 256px minmax(0, 1fr); }
 .desktop-windows { grid-template-rows: 44px minmax(0, 1fr); }
-.windows-titlebar { display: grid; grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) auto; min-height: 44px; background: var(--snow); border-bottom: 2px solid var(--line); }
+.windows-titlebar { position: sticky; z-index: 20; top: 0; display: grid; grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) auto; min-height: 44px; background: var(--snow); border-bottom: 2px solid var(--line); }
 .windows-drag-region { min-width: 0; -webkit-app-region: drag; }
 .windows-controls { display: flex; align-items: center; gap: 7px; padding: 6px 10px 7px; -webkit-app-region: no-drag; }
 .window-control { display: grid; place-items: center; width: 32px; height: 30px; padding: 0 0 2px; border: 2px solid; border-bottom-width: 4px; border-radius: 10px; cursor: pointer; transition: background-color var(--motion), border-color var(--motion), color var(--motion), transform var(--motion); }
