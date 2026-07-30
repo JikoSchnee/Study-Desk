@@ -23,13 +23,13 @@ export function DesktopUpdater() {
     return api.updater.onStatus((next) => setStatus(next as UpdaterStatus));
   }, []);
 
-  if (!desktop) return null;
   const isAvailable = status.state === "available" || status.state === "downloading" || status.state === "downloaded";
   const release = status.state === "available" || status.state === "downloaded" ? status : null;
 
   return <Panel className="desktop-updater" aria-live="polite">
-    <div className="desktop-updater-heading"><div><p className="eyebrow"><Rocket size={15}/> 桌面应用</p><h2>版本更新</h2></div><Button type="button" variant="outline" disabled={status.state === "checking" || status.state === "downloading"} onClick={() => void window.mockInterviewDesktop?.updater.check()}><RefreshCw size={16}/>{status.state === "checking" ? "正在检查…" : "检查更新"}</Button></div>
-    {status.state === "idle" && <p className="muted-copy">应用会在启动后及每 6 小时检查一次稳定版更新。</p>}
+    <div className="desktop-updater-heading"><div><p className="eyebrow"><Rocket size={15}/> 桌面应用</p><h2>版本更新</h2></div><Button type="button" variant="outline" disabled={!desktop || status.state === "checking" || status.state === "downloading"} onClick={() => void window.mockInterviewDesktop?.updater.check()}><RefreshCw size={16}/>{status.state === "checking" ? "正在检查…" : "检查更新"}</Button></div>
+    {!desktop && <p className="muted-copy">版本检查仅在桌面应用中可用。</p>}
+    {desktop && <>{status.state === "idle" && <p className="muted-copy">应用会在启动后及每 6 小时检查一次稳定版更新。</p>}
     {status.state === "not-available" && <p className="desktop-update-ok"><CheckCircle2 size={17}/> 已是最新版本。</p>}
     {status.state === "development" && <p className="muted-copy">开发模式不检查 GitHub Releases。</p>}
     {status.state === "error" && <p className="desktop-update-error">更新检查失败：{status.message}</p>}
@@ -39,7 +39,7 @@ export function DesktopUpdater() {
       {status.state === "available" && <div className="form-actions"><Button type="button" onClick={() => void window.mockInterviewDesktop?.updater.download()}><Download size={16}/> 立即更新</Button><Button type="button" variant="warning" onClick={() => void window.mockInterviewDesktop?.updater.defer()}>下次启动时更新</Button><Button type="button" variant="danger" onClick={() => void window.mockInterviewDesktop?.updater.ignore()}><X size={16}/> 忽略此版本</Button></div>}
       {status.state === "downloading" && <div className="desktop-download-progress"><progress value={status.percent} max="100"/><span>{status.percent}% · {bytes(status.transferred)} / {bytes(status.total)}</span></div>}
       {status.state === "downloaded" && <Button type="button" onClick={() => void window.mockInterviewDesktop?.updater.install()}><Rocket size={16}/> 重启并安装</Button>}
-    </div>}
+    </div>}</>}
   </Panel>;
 }
 
