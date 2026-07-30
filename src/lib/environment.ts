@@ -16,6 +16,8 @@ export type EnvironmentSettings = {
   apiKeyConfigured: boolean;
 };
 
+export type RuntimeEnvironmentValues = Record<ManagedKey, string>;
+
 function parseValue(raw: string) {
   const value = raw.trim();
   if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
@@ -40,6 +42,16 @@ function readManagedValues(content: string) {
 }
 
 function valueFor(key: ManagedKey, values: EnvironmentValues) { return values[key] ?? process.env[key] ?? ""; }
+
+// Next only loads .env.local from the application bundle at startup. Desktop
+// settings deliberately live in MOCK_INTERVIEW_HOME instead, so consult that
+// persistent file whenever a server feature needs its runtime configuration.
+// An explicitly provided process value still wins; this keeps command-line and
+// test configuration predictable, including an intentionally empty value.
+export function getRuntimeEnvironmentValues(): RuntimeEnvironmentValues {
+  const stored = readManagedValues(readFile());
+  return Object.fromEntries(managedKeys.map((key) => [key, Object.prototype.hasOwnProperty.call(process.env, key) ? process.env[key] ?? "" : stored[key] ?? ""])) as RuntimeEnvironmentValues;
+}
 
 export function getEnvironmentSettings(): EnvironmentSettings {
   const values = readManagedValues(readFile());

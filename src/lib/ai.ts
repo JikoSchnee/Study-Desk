@@ -1,6 +1,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { modelProviders, type ModelProviderId, type ModelProtocol } from "@/lib/model-providers";
+import { getRuntimeEnvironmentValues } from "@/lib/environment";
 import { normalizeQuestion } from "@/lib/question-variants";
 import { compareWithEmbeddings, comparisonFromLLM, evaluationFromComparison } from "@/lib/answer-comparison";
 import { answerPointLabels } from "@/lib/import";
@@ -13,10 +14,11 @@ export interface TextToSpeechProvider { synthesize(text: string): Promise<ArrayB
 type RemoteModelConfig = { provider: ModelProviderId; protocol: ModelProtocol; baseUrl: string; apiKey: string; model: string };
 
 function remoteModelConfig(): RemoteModelConfig | null {
-  const baseUrl = process.env.LLM_BASE_URL?.replace(/\/$/, "");
-  const apiKey = process.env.LLM_API_KEY;
-  const model = process.env.LLM_MODEL;
-  const requestedProvider = process.env.LLM_PROVIDER;
+  const environment = getRuntimeEnvironmentValues();
+  const baseUrl = environment.LLM_BASE_URL.replace(/\/$/, "");
+  const apiKey = environment.LLM_API_KEY;
+  const model = environment.LLM_MODEL;
+  const requestedProvider = environment.LLM_PROVIDER;
   const provider: ModelProviderId = requestedProvider && requestedProvider in modelProviders ? requestedProvider as ModelProviderId : "custom";
   if (!baseUrl || !apiKey || !model) return null;
   return { provider, protocol: modelProviders[provider].protocol, baseUrl, apiKey, model };

@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { generateQuestionVariants, parseGeneratedFollowUpCardDraft, parseGeneratedQuestionVariants } from "./ai";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { generateQuestionVariants, hasRemoteModelConfig, parseGeneratedFollowUpCardDraft, parseGeneratedQuestionVariants } from "./ai";
 import type { Card } from "./types";
 
 afterEach(() => {
@@ -30,6 +33,21 @@ describe("AI question variant parsing", () => {
     vi.stubGlobal("fetch", fetchMock);
     await expect(generateQuestionVariants("什么是 RAG？", ["检索增强生成"], [])).rejects.toThrow("请先在设置中配置模型服务");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("loads the desktop's persisted model settings after a server restart", () => {
+    const directory = mkdtempSync(join(tmpdir(), "mock-interview-ai-"));
+    try {
+      writeFileSync(join(directory, ".env.local"), 'LLM_PROVIDER="openai"\nLLM_BASE_URL="https://api.openai.com/v1"\nLLM_API_KEY="saved-key"\nLLM_MODEL="gpt-4.1-mini"\n');
+      vi.stubEnv("MOCK_INTERVIEW_HOME", directory);
+      vi.stubEnv("LLM_PROVIDER", undefined);
+      vi.stubEnv("LLM_BASE_URL", undefined);
+      vi.stubEnv("LLM_API_KEY", undefined);
+      vi.stubEnv("LLM_MODEL", undefined);
+      expect(hasRemoteModelConfig()).toBe(true);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("keeps provider failures actionable", async () => {
