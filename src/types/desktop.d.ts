@@ -1,11 +1,8 @@
 export {};
 
-type UpdateStatus =
-  | { state: "checking" | "not-available" | "development" }
-  | { state: "available" | "downloaded"; version: string; notes: string }
-  | { state: "downloading"; percent: number; transferred: number; total: number }
-  | { state: "ignored"; version: string }
-  | { state: "error"; message: string };
+type ManualUpdateStatus =
+  | { state: "current" | "available"; currentVersion: string; latestVersion: string; title: string; notes: string; publishedAt: string | null; url: string }
+  | { state: "error"; currentVersion: string; message: string };
 
 declare global {
   interface Window {
@@ -18,13 +15,8 @@ declare global {
         isMaximized(): Promise<boolean>;
         onMaximizeChange(listener: (maximized: boolean) => void): () => void;
       };
-      updater: {
-        check(): Promise<unknown>;
-        download(): Promise<void>;
-        defer(): Promise<void>;
-        ignore(): Promise<void>;
-        install(): Promise<void>;
-        onStatus(listener: (status: UpdateStatus) => void): () => void;
+      updates: {
+        check(): Promise<ManualUpdateStatus>;
       };
     };
   }

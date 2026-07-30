@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { BookOpenCheck, ClipboardList, LibraryBig, Maximize2, Minimize2, Settings, Square, X } from "lucide-react";
 import { SemanticModelPrewarm } from "@/components/semantic-model-prewarm";
-import { DesktopUpdatePrompt } from "@/components/desktop-updater";
 
 const nav = [
   ["/", "今日", ClipboardList],
@@ -33,7 +32,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return <div className={isWindowsDesktop ? "app-frame desktop-windows" : "app-frame"}>
     <SemanticModelPrewarm />
-    <DesktopUpdatePrompt />
     {isWindowsDesktop && <header className="windows-titlebar" aria-label="窗口控制区">
       <div className="windows-drag-region" />
       <div className="windows-controls" aria-label="窗口控制">

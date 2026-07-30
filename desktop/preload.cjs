@@ -13,16 +13,7 @@ contextBridge.exposeInMainWorld("mockInterviewDesktop", {
       return () => ipcRenderer.removeListener("window:maximize-change", callback);
     },
   },
-  updater: {
-    check: () => ipcRenderer.invoke("updater:check"),
-    download: () => ipcRenderer.invoke("updater:download"),
-    defer: () => ipcRenderer.invoke("updater:defer"),
-    ignore: () => ipcRenderer.invoke("updater:ignore"),
-    install: () => ipcRenderer.invoke("updater:install"),
-    onStatus: (listener) => {
-      const callback = (_event, status) => listener(status);
-      ipcRenderer.on("updater:status", callback);
-      return () => ipcRenderer.removeListener("updater:status", callback);
-    },
+  updates: {
+    check: () => ipcRenderer.invoke("updates:check"),
   },
 });

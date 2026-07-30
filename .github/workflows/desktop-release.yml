@@ -33,26 +33,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Build macOS application
-        shell: bash
-        run: |
-          if [ -n "$MACOS_CERTIFICATE" ]; then
-            export CSC_LINK="$MACOS_CERTIFICATE"
-            export CSC_KEY_PASSWORD="$MACOS_CERTIFICATE_PASSWORD"
-            export APPLE_ID
-            export APPLE_APP_SPECIFIC_PASSWORD
-            export APPLE_TEAM_ID
-          fi
-          npm run desktop:dist -- --mac --arm64
-        env:
-          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
-          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      - name: Verify macOS update asset
-        shell: bash
-        run: |
-          node -e "const fs=require('fs'); const manifest=fs.readFileSync('release/latest-mac.yml','utf8'); const match=manifest.match(/^path:\\s*(.+)$/m); if (!match) throw new Error('latest-mac.yml does not contain an update path'); const asset=match[1].trim().replace(/^['\"]|['\"]$/g,''); if (!fs.existsSync('release/' + asset)) throw new Error('Missing macOS update asset: ' + asset); console.log('Verified macOS update asset:', asset);"
+        run: npm run desktop:dist -- --mac --arm64
       - uses: actions/upload-artifact@v4
         with:
           name: macos-release
@@ -69,16 +50,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Build Windows application
-        shell: bash
-        run: |
-          if [ -n "$WINDOWS_CERTIFICATE" ]; then
-            export CSC_LINK="$WINDOWS_CERTIFICATE"
-            export CSC_KEY_PASSWORD="$WINDOWS_CERTIFICATE_PASSWORD"
-          fi
-          npm run desktop:dist -- --win --x64
-        env:
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: npm run desktop:dist -- --win --x64
       - uses: actions/upload-artifact@v4
         with:
           name: windows-release

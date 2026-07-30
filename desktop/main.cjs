@@ -1,26 +1,41 @@
 const { app, BrowserWindow, ipcMain, utilityProcess } = require("electron");
-const { autoUpdater } = require("electron-updater");
-const { existsSync, readFileSync, writeFileSync } = require("node:fs");
+const { existsSync } = require("node:fs");
 const http = require("node:http");
+const https = require("node:https");
 const net = require("node:net");
 const path = require("node:path");
 
 let mainWindow;
 let serverProcess;
 let serverPort;
-let availableUpdate;
-let downloadedUpdate;
-let updateSettings = {};
 
 function userHome() { return path.join(app.getPath("userData"), "runtime"); }
-function updateSettingsPath() { return path.join(app.getPath("userData"), "updater.json"); }
-function loadUpdateSettings() {
-  try { updateSettings = JSON.parse(readFileSync(updateSettingsPath(), "utf8")); }
-  catch { updateSettings = {}; }
-}
-function saveUpdateSettings() { writeFileSync(updateSettingsPath(), JSON.stringify(updateSettings, null, 2)); }
-function sendUpdate(status) { mainWindow?.webContents.send("updater:status", status); }
 function sendMaximizeState() { mainWindow?.webContents.send("window:maximize-change", mainWindow?.isMaximized() ?? false); }
+function compareVersions(left, right) {
+  const leftParts = String(left).replace(/^v/, "").split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const rightParts = String(right).replace(/^v/, "").split(".").map((part) => Number.parseInt(part, 10) || 0);
+  for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
+    if ((leftParts[index] ?? 0) !== (rightParts[index] ?? 0)) return (leftParts[index] ?? 0) > (rightParts[index] ?? 0) ? 1 : -1;
+  }
+  return 0;
+}
+function fetchLatestRelease() {
+  return new Promise((resolve, reject) => {
+    const request = https.get("https://api.github.com/repos/JikoSchnee/Study-Desk/releases/latest", {
+      headers: { Accept: "application/vnd.github+json", "User-Agent": "Study-Desk" },
+    }, (response) => {
+      let body = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => { body += chunk; });
+      response.on("end", () => {
+        if (response.statusCode !== 200) return reject(new Error(`GitHub 返回了 ${response.statusCode ?? "未知"} 状态。`));
+        try { resolve(JSON.parse(body)); } catch { reject(new Error("无法读取 GitHub 的版本信息。")); }
+      });
+    });
+    request.setTimeout(10_000, () => request.destroy(new Error("检查更新超时。")));
+    request.on("error", reject);
+  });
+}
 
 function findPort() {
   return new Promise((resolve, reject) => {
@@ -86,36 +101,29 @@ function createWindow() {
   mainWindow.loadURL(`http://127.0.0.1:${serverPort}`);
 }
 
-function configureUpdater() {
-  if (!app.isPackaged) return;
-  autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = false;
-  autoUpdater.allowPrerelease = false;
-  autoUpdater.on("checking-for-update", () => sendUpdate({ state: "checking" }));
-  autoUpdater.on("update-not-available", () => sendUpdate({ state: "not-available" }));
-  autoUpdater.on("update-available", (info) => {
-    availableUpdate = info;
-    if (updateSettings.ignoredVersion === info.version) return;
-    sendUpdate({ state: "available", version: info.version, notes: typeof info.releaseNotes === "string" ? info.releaseNotes : "" });
-    if (updateSettings.deferredVersion === info.version) void autoUpdater.downloadUpdate();
-  });
-  autoUpdater.on("download-progress", (progress) => sendUpdate({ state: "downloading", percent: Math.round(progress.percent), transferred: progress.transferred, total: progress.total }));
-  autoUpdater.on("update-downloaded", (info) => { downloadedUpdate = info; updateSettings.deferredVersion = undefined; saveUpdateSettings(); sendUpdate({ state: "downloaded", version: info.version, notes: typeof info.releaseNotes === "string" ? info.releaseNotes : "" }); });
-  autoUpdater.on("error", (error) => sendUpdate({ state: "error", message: error.message }));
-  setTimeout(() => { void autoUpdater.checkForUpdates(); }, 8_000);
-  setInterval(() => { void autoUpdater.checkForUpdates(); }, 6 * 60 * 60 * 1_000);
-}
-
 ipcMain.handle("window:minimize", () => mainWindow?.minimize());
 ipcMain.handle("window:toggle-maximize", () => { if (mainWindow?.isMaximized()) mainWindow.unmaximize(); else mainWindow?.maximize(); });
 ipcMain.handle("window:close", () => mainWindow?.close());
 ipcMain.handle("window:is-maximized", () => mainWindow?.isMaximized() ?? false);
-ipcMain.handle("updater:check", async () => { if (!app.isPackaged) return { state: "development" }; return autoUpdater.checkForUpdates(); });
-ipcMain.handle("updater:download", () => autoUpdater.downloadUpdate());
-ipcMain.handle("updater:defer", () => { if (availableUpdate) { updateSettings.deferredVersion = availableUpdate.version; saveUpdateSettings(); } });
-ipcMain.handle("updater:ignore", () => { if (availableUpdate) { updateSettings.ignoredVersion = availableUpdate.version; updateSettings.deferredVersion = undefined; saveUpdateSettings(); sendUpdate({ state: "ignored", version: availableUpdate.version }); } });
-ipcMain.handle("updater:install", () => { if (downloadedUpdate) autoUpdater.quitAndInstall(); });
-
+ipcMain.handle("updates:check", async () => {
+  const currentVersion = app.getVersion();
+  try {
+    const release = await fetchLatestRelease();
+    if (!release?.tag_name) throw new Error("GitHub 未返回有效的版本号。");
+    const latestVersion = String(release.tag_name).replace(/^v/, "");
+    return {
+      state: compareVersions(latestVersion, currentVersion) > 0 ? "available" : "current",
+      currentVersion,
+      latestVersion,
+      title: typeof release.name === "string" && release.name.trim() ? release.name : `v${latestVersion}`,
+      notes: typeof release.body === "string" ? release.body : "",
+      publishedAt: typeof release.published_at === "string" ? release.published_at : null,
+      url: typeof release.html_url === "string" ? release.html_url : "https://github.com/JikoSchnee/Study-Desk/releases",
+    };
+  } catch (error) {
+    return { state: "error", currentVersion, message: error instanceof Error ? error.message : "检查更新失败。" };
+  }
+});
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) app.quit();
 
@@ -127,8 +135,7 @@ app.on("second-instance", () => {
 
 app.whenReady().then(async () => {
   if (!gotSingleInstanceLock) return;
-  loadUpdateSettings();
-  try { await startServer(); createWindow(); configureUpdater(); }
+  try { await startServer(); createWindow(); }
   catch (error) { console.error(error); app.quit(); }
 });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });

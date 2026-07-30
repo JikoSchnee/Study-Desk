@@ -27,7 +27,6 @@
     "better-sqlite3": "^12.4.1",
     "date-fns": "^4.1.0",
     "drizzle-orm": "^0.44.7",
-    "electron-updater": "^6.8.9",
     "lucide-react": "^0.468.0",
     "next": "^15.5.0",
     "react": "^19.1.0",
@@ -38,7 +37,6 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@electron/notarize": "^3.1.1",
     "@playwright/test": "^1.55.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.0",
@@ -107,24 +105,16 @@
     },
     "mac": {
       "target": [
-        "dmg",
-        "zip"
+        "dmg"
       ],
       "category": "public.app-category.education",
-      "hardenedRuntime": true,
+      "identity": null,
+      "hardenedRuntime": false,
       "gatekeeperAssess": false
     },
     "dmg": {
       "title": "Study Desk ${version}"
     },
-    "afterSign": "desktop/notarize.cjs",
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "JikoSchnee",
-        "repo": "Study-Desk",
-        "releaseType": "release"
-      }
-    ]
+    "publish": null
   }
 }
