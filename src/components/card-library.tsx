@@ -25,7 +25,7 @@ type EditorSaveState = "idle" | "saving" | "success";
 type WorkspaceMode = "manual" | "import";
 const defaultKnowledgeBaseTypes = ["Agent", "Java 后端", "计算机基础"];
 const cardsPageSize = 20;
-type CardPage = { cards: Card[]; learning: Record<string, CardLearningSummary>; total: number; catalogTotal: number; hasMore: boolean; facets: { tracks: string[]; tags: string[] } };
+type CardPage = { cards: Card[]; learning: Record<string, CardLearningSummary>; total: number; hasMore: boolean; facets: { tracks: string[]; tags: string[] } };
 
 function compactReviewTime(value: string | null | undefined, future = false) {
   if (!value) return future ? "待首次作答" : "尚未练习";
@@ -162,7 +162,6 @@ export function CardLibrary() {
   const [learningByCardId, setLearningByCardId] = useState<Record<string, CardLearningSummary>>({});
   const [relationCards, setRelationCards] = useState<Card[]>([]);
   const [cardsTotal, setCardsTotal] = useState(0);
-  const [catalogTotal, setCatalogTotal] = useState(0);
   const [hasMoreCards, setHasMoreCards] = useState(false);
   const [cardsLoading, setCardsLoading] = useState(true);
   const [cardsLoadingMore, setCardsLoadingMore] = useState(false);
@@ -229,7 +228,6 @@ export function CardLibrary() {
       setCards((current) => replace ? data.cards : [...current, ...data.cards.filter((card) => !current.some((existing) => existing.id === card.id))]);
       setLearningByCardId((current) => replace ? data.learning : { ...current, ...data.learning });
       setCardsTotal(data.total);
-      setCatalogTotal(data.catalogTotal);
       setHasMoreCards(data.hasMore);
       setCatalogTracks(data.facets.tracks);
       setCatalogTags(data.facets.tags);
@@ -425,6 +423,7 @@ export function CardLibrary() {
     } finally { if (!saved) setEditBusy(false); }
   };
   const toggleSelected = (id: string) => setSelectedIds((ids) => { const next = new Set(ids); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+  const showActiveCards = () => { setShowArchived(false); setSelectedIds(new Set()); };
   const selectFromCardSurface = (event: ReactMouseEvent<HTMLElement>, id: string) => {
     if (!selectedIds.size || targetsCardControl(event.target)) return;
     toggleSelected(id);
@@ -473,19 +472,19 @@ export function CardLibrary() {
       {editorSaveState !== "idle" && <div ref={editorSaveStatusRef} className={`card-editor-save-overlay ${editorSaveState}`} role="status" aria-live="polite" aria-atomic="true" tabIndex={-1}>{editorSaveState === "saving" ? <div className="card-editor-save-pending"><span className="card-editor-save-spinner" aria-hidden="true"/><strong>正在保存…</strong><p>正在更新这张卡片</p></div> : <div className="card-editor-save-success" onAnimationEnd={(event) => { if (event.target === event.currentTarget) completeCardSave(); }}><span aria-hidden="true"><CheckCircle2 size={46} strokeWidth={3}/></span><strong>保存成功</strong><p>卡片已更新</p></div>}</div>}
     </section></div>}
     <section className="cards-library"><div className="section-title"><h2>已沉淀的卡片</h2><span>{cards.length} / {cardsTotal} 张</span></div>
-      {catalogTotal > 0 && <><div ref={setFilterBarNode} className="cards-filter-bar" data-tour="library-filters" aria-label="卡片筛选与排序">
+      <><div ref={setFilterBarNode} className="cards-filter-bar" data-tour="library-filters" aria-label="卡片筛选与排序">
         <div className="cards-filter-row cards-filter-row-primary">
           <label className="card-search"><Search size={17}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索问题、答案、标签或备注" aria-label="搜索卡片" /></label>
           <SearchableSelect variant="filter" value={selectedTrack} onChange={setSelectedTrack} options={savedKnowledgeBaseTypes} placeholder="知识库类型" ariaLabel="筛选知识库类型" emptyText="暂无可选类型" />
           <label className="filter-select">排序<select value={sort} onChange={(event) => changeSort(event.target.value as CardSort)}><option value="updated">最近更新</option><option value="created">最近创建</option><option value="review">复习时间</option><option value="practice">练习时间</option><option value="difficulty">难度</option></select></label>
-          <Button type="button" variant={showArchived ? "secondary" : "ghost"} onClick={() => { setShowArchived((value) => !value); setSelectedIds(new Set()); }}>{showArchived ? "查看活动卡片" : "查看已归档"}</Button>
+          <Button type="button" variant={showArchived ? "secondary" : "ghost"} onClick={() => { if (showArchived) showActiveCards(); else { setShowArchived(true); setSelectedIds(new Set()); } }}>{showArchived ? "查看活动卡片" : "查看已归档"}</Button>
         </div>
         <div className="cards-filter-row cards-filter-row-secondary">
           <SearchableSelect multiple variant="filter" value={[...selectedTags]} onChange={(values) => setSelectedTags(new Set(values))} options={tags} placeholder="标签" ariaLabel="筛选标签" emptyText="暂无可选标签" />
           <button type="button" className="sort-direction" onClick={() => setSortDirection((direction) => direction === "asc" ? "desc" : "asc")} aria-label={sortDirection === "asc" ? "切换为降序" : "切换为升序"} title={sortDirection === "asc" ? "当前：升序" : "当前：降序"}><ArrowUpDown size={17}/>{sortDirection === "asc" ? "升序" : "降序"}</button>
           <button type="button" className="clear-card-filters" onClick={clearFilters}>清除筛选</button>
         </div>
-      </div><div data-tour="library-selection">{selectedIds.size > 0 && <div className="bulk-card-toolbar" role="status"><strong>已选择 {selectedIds.size} 张</strong>{showArchived ? <Button variant="secondary" onClick={() => bulk("restore")}><Undo2 size={16}/> 恢复</Button> : <Button variant="secondary" onClick={() => bulk("archive")}><Archive size={16}/> 归档</Button>}<Button variant="ghost" onClick={() => { const value = window.prompt("添加标签（用逗号分隔）"); if (value) void bulk("addTags", splitTags(value)); }}><Tag size={16}/> 添加标签</Button><Button variant="ghost" onClick={() => { const value = window.prompt("移动到知识库类型"); if (value) void bulk("move", value); }}>移动类型</Button><Button variant="ghost" onClick={() => exportSelected("csv")}><Download size={16}/> CSV</Button><Button variant="ghost" onClick={() => exportSelected("json")}><Download size={16}/> JSON</Button><Button variant="danger" onClick={() => bulk("delete")}><Trash2 size={16}/> 永久删除</Button><button type="button" className="clear-card-filters" onClick={() => setSelectedIds(new Set())}>取消选择</button></div>}</div></>}
+      </div><div data-tour="library-selection">{selectedIds.size > 0 && <div className="bulk-card-toolbar" role="status"><strong>已选择 {selectedIds.size} 张</strong>{showArchived ? <Button variant="secondary" onClick={() => bulk("restore")}><Undo2 size={16}/> 恢复</Button> : <Button variant="secondary" onClick={() => bulk("archive")}><Archive size={16}/> 归档</Button>}<Button variant="ghost" onClick={() => { const value = window.prompt("添加标签（用逗号分隔）"); if (value) void bulk("addTags", splitTags(value)); }}><Tag size={16}/> 添加标签</Button><Button variant="ghost" onClick={() => { const value = window.prompt("移动到知识库类型"); if (value) void bulk("move", value); }}>移动类型</Button><Button variant="ghost" onClick={() => exportSelected("csv")}><Download size={16}/> CSV</Button><Button variant="ghost" onClick={() => exportSelected("json")}><Download size={16}/> JSON</Button><Button variant="danger" onClick={() => bulk("delete")}><Trash2 size={16}/> 永久删除</Button><button type="button" className="clear-card-filters" onClick={() => setSelectedIds(new Set())}>取消选择</button></div>}</div></>
       {cardsLoading ? <div className="cards-loading" role="status">正在加载卡片…</div> : cardsTotal ? cards.length ? <><div className="card-grid">{cards.map((card) => {
         const learning = learningByCardId[card.id];
         const difficulty = difficultyTier(learning?.fsrsDifficulty);
@@ -529,7 +528,7 @@ export function CardLibrary() {
             <div className="card-meta"><Chip tone="blue">类型：{card.track}</Chip>{card.tags.map((tag) => <Chip key={tag} tone="ink">#{tagLabel(tag)}</Chip>)}</div>
           </div>
         </KnowledgeCardFrame>;
-      })}</div><div ref={setLoadMoreNode} className="cards-load-more" aria-live="polite">{cardsLoadingMore ? "正在加载更多卡片…" : hasMoreCards ? "继续向下滚动以加载更多" : "已显示全部卡片"}</div></> : <EmptyState title="没有符合条件的卡片" detail="换个关键词，或清除筛选条件再试试。" /> : <EmptyState title="你的题库还没有内容" detail="从一个你曾经答得不够顺的问题开始记录。" action={<Button type="button" onClick={() => openWorkspace("manual")}>创建第一张卡片</Button>} />}
+      })}</div><div ref={setLoadMoreNode} className="cards-load-more" aria-live="polite">{cardsLoadingMore ? "正在加载更多卡片…" : hasMoreCards ? "继续向下滚动以加载更多" : "已显示全部卡片"}</div></> : <EmptyState title="没有符合条件的卡片" detail="换个关键词，或清除筛选条件再试试。" /> : showArchived ? <EmptyState title="没有已归档的卡片" detail="归档的卡片会在这里显示。" action={<Button type="button" variant="secondary" onClick={showActiveCards}>查看活动卡片</Button>} /> : <EmptyState title="你的题库还没有内容" detail="从一个你曾经答得不够顺的问题开始记录。" action={<Button type="button" onClick={() => openWorkspace("manual")}>创建第一张卡片</Button>} />}
     </section>{(filterBarAboveViewport || returnScrollPosition !== null) && <button type="button" className="library-scroll-toggle" onClick={navigateLibraryScroll} aria-label={returnScrollPosition === null ? "回到卡片库顶部" : "回到刚才浏览的位置"} title={returnScrollPosition === null ? "回到顶部" : "回到刚才的位置"}>{returnScrollPosition === null ? <ArrowUp size={21}/> : <ArrowDown size={21}/>}</button>}
   </PageLayout>;
 }
