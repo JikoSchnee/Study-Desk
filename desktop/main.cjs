@@ -116,6 +116,7 @@ ipcMain.handle("updates:check", async () => {
       currentVersion,
       latestVersion,
       url: typeof release.html_url === "string" ? release.html_url : "https://github.com/JikoSchnee/Study-Desk/releases",
+      releaseNotes: typeof release.body === "string" && release.body.trim() ? release.body.trim() : "此版本暂未提供更新说明。",
     };
   } catch (error) {
     return { state: "error", currentVersion, message: error instanceof Error ? error.message : "检查更新失败。" };
