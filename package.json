@@ -107,7 +107,8 @@
     },
     "mac": {
       "target": [
-        "dmg"
+        "dmg",
+        "zip"
       ],
       "category": "public.app-category.education",
       "hardenedRuntime": true,
