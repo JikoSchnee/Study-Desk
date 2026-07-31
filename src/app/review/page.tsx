@@ -14,6 +14,7 @@ import { useSemanticComparisonProgress } from "@/components/use-semantic-compari
 import { difficultyTier } from "@/lib/card-filters";
 import { answerPointLabels } from "@/lib/import";
 import { usePageState } from "@/components/page-state-cache";
+import { ReviewCardEditorDialog } from "@/components/review-card-editor-dialog";
 import { ReviewLearningChat } from "@/components/review-learning-chat";
 import type { AnswerComparisonMode, Card, CardLearningSummary, Evaluation, RatingName } from "@/lib/types";
 
@@ -64,6 +65,8 @@ export default function ReviewPage() {
   const [studyError, setStudyError] = usePageState("review:study-error", "");
   const [studyEditMode, setStudyEditMode] = usePageState<Record<string, "note" | "hint">>("review:point-edit-mode", {});
   const [studyEditErrors, setStudyEditErrors] = usePageState<Record<string, string>>("review:point-edit-errors", {});
+  const [fullEditorOpen, setFullEditorOpen] = usePageState("review:full-editor-open", false);
+  const [tagExpansion, setTagExpansion] = usePageState<Record<string, boolean>>("review:tag-expansion", {});
   const [learningChatOpen, setLearningChatOpen] = usePageState<boolean | null>("review:learning-chat-open", null);
   const studySaveTimers = useRef<Record<string, number>>({});
   const reviewCardRef = useRef<HTMLElement | null>(null);
@@ -207,11 +210,22 @@ export default function ReviewPage() {
   const loadRandom = useCallback(() => void loadSession("random", seenRandomIds), [loadSession, seenRandomIds]);
   const leaveSession = useCallback(() => { setSession(null); setCard(null); setEvaluation(null); void loadQueueProgress(); }, [loadQueueProgress]);
 
+  const saveCurrentStudyEdits = useCallback(async () => {
+    if (!card) return;
+    Object.values(studySaveTimers.current).forEach((timer) => window.clearTimeout(timer));
+    studySaveTimers.current = {};
+    const response = await fetch("/api/cards", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: card.id, question: card.question, questionVariants: card.questionVariants, relations: card.relations, answerPoints: card.answerPoints, note: card.note, track: card.track, tags: card.tags, difficulty: card.difficulty, source: card.source ?? "" }) });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error ?? "无法保存当前批注和提示。");
+    setCard(data.card);
+  }, [card, setCard]);
+
   const completeStudy = useCallback(async (): Promise<string | void> => {
     if (!card || session !== "initial") return "当前卡片无法完成首次学习。";
     if (revealedStudyPoints.length < card.answerPoints.length) return "请先看完全部要点。";
     setStudyBusy(true); setStudyError("");
     try {
+      await saveCurrentStudyEdits();
       const response = await fetch("/api/review/study", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cardId: card.id }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "无法完成首次学习。");
@@ -221,7 +235,7 @@ export default function ReviewPage() {
       setStudyError(message);
       return message;
     } finally { setStudyBusy(false); }
-  }, [card, loadSession, revealedStudyPoints.length, session]);
+  }, [card, loadSession, revealedStudyPoints.length, saveCurrentStudyEdits, session]);
 
   const evaluate = useCallback(async (): Promise<string | void> => {
     if (!card || !answer.trim()) return "请先写一段自己的回答，下一步会用同一个提交操作生成报告。";
@@ -273,13 +287,13 @@ export default function ReviewPage() {
 
   if (card === undefined) return <div className="loading">正在准备下一道练习题…</div>;
 
-  if (!card && session === "random") return <PageLayout><PageHeader eyebrow={<><Dices size={15}/> 随机练习</>} title="题库还没有可抽取的卡片。" description="先创建一张卡片，把一个知识点练成能说出口的话。" tour="review" actions={<Button variant="secondary" onClick={leaveSession}>返回练习选择</Button>} /><EmptyState title="还没有可练习的卡片" detail="创建卡片后就可以随时随机抽题。" action={<Link href="/library"><Button>去建立卡片</Button></Link>} /></PageLayout>;
+  if (!card && session === "random") return <PageLayout><PageHeader eyebrow={<><Dices size={15}/> 随机练习</>} title="题库还没有可抽取的卡片。" description="先创建一张卡片，把一个知识点练成能说出口的话。" tour="review" actions={<Button variant="secondary" onClick={leaveSession}>退出</Button>} /><EmptyState title="还没有可练习的卡片" detail="创建卡片后就可以随时随机抽题。" action={<Link href="/library"><Button>去建立卡片</Button></Link>} /></PageLayout>;
 
   if (!card && session !== null && session !== "random") {
     const other = session === "initial" ? "review" : session === "review" ? "initial" : null;
     const otherStats = other ? progress?.[other] ?? { pending: 0, completedToday: 0 } : { pending: 0, completedToday: 0 };
     const copy = queueCopy[session];
-    return <PageLayout><PageHeader eyebrow={<><BookOpenCheck size={15}/> {copy.label}</>} title={`${copy.label}已完成。`} description={`${progress ? `${progressText(progress[session])}。` : ""}${other && otherStats.pending ? ` 接下来还有 ${otherStats.pending} 道${queueCopy[other].label}。` : " 今天的练习告一段落。"}`} tour="review" actions={<Button variant="secondary" onClick={leaveSession}>返回练习选择</Button>} /><EmptyState title={other && otherStats.pending ? "继续下一类练习" : "今天的练习告一段落"} detail={other && otherStats.pending ? `确认后进入${queueCopy[other].label}，进度会继续累计。` : "明天再来复习，记忆会更牢。"} action={other && otherStats.pending ? <Button onClick={() => startQueue(other)}>继续{queueCopy[other].label}<ArrowRight size={17}/></Button> : <Link href="/library"><Button>查看题库</Button></Link>} /></PageLayout>;
+    return <PageLayout><PageHeader eyebrow={<><BookOpenCheck size={15}/> {copy.label}</>} title={`${copy.label}已完成。`} description={`${progress ? `${progressText(progress[session])}。` : ""}${other && otherStats.pending ? ` 接下来还有 ${otherStats.pending} 道${queueCopy[other].label}。` : " 今天的练习告一段落。"}`} tour="review" actions={<Button variant="secondary" onClick={leaveSession}>退出</Button>} /><EmptyState title={other && otherStats.pending ? "继续下一类练习" : "今天的练习告一段落"} detail={other && otherStats.pending ? `确认后进入${queueCopy[other].label}，进度会继续累计。` : "明天再来复习，记忆会更牢。"} action={other && otherStats.pending ? <Button onClick={() => startQueue(other)}>继续{queueCopy[other].label}<ArrowRight size={17}/></Button> : <Link href="/library"><Button>查看题库</Button></Link>} /></PageLayout>;
   }
 
   const queue = session as SessionKind;
@@ -297,6 +311,9 @@ export default function ReviewPage() {
   };
   const stats = !isRandom ? progress?.[queue] : null;
   const sessionCopy = !isRandom ? queueCopy[queue] : null;
+  const tagsOpen = tagExpansion[activeCard.id] ?? isInitial;
+  const tagProgressTotal = stats ? stats.pending + stats.completedToday : 0;
+  const tagProgressPercent = tagProgressTotal ? Math.round((stats!.completedToday / tagProgressTotal) * 100) : 0;
   const chatOpen = learningChatOpen ?? isInitial;
   const setChatOpenWithFlip = (nextOpen: boolean) => {
     const cardElement = reviewCardRef.current;
@@ -347,20 +364,23 @@ export default function ReviewPage() {
   };
 
   return <PageLayout>
+    {fullEditorOpen && <ReviewCardEditorDialog card={activeCard} onClose={() => setFullEditorOpen(false)} onSaved={(updatedCard) => { setCard(updatedCard); setFullEditorOpen(false); }} />}
     <SemanticComparisonProgress open={semanticProgress.open} progress={semanticProgress.progress}/>
-    <PageHeader eyebrow={<><BrainCircuit size={15}/> {isRandom ? "随机练习" : sessionCopy?.label}</>} title={isRandom ? "随机抽一题，说说看。" : isInitial ? "先看懂，再进入回忆。" : queue === "weak" ? "把难点练扎实。" : "把记忆再叫回来。"} description={isRandom ? "这次练习只提供反馈，不会影响复习排程。" : isInitial ? "这不是考试：逐条看完答案要点后，明天再进行第一次主动回忆。" : queue === "weak" ? "薄弱复习不改变排程，练好后可以把它移出队列。" : "说不完整没关系，关键是把思路调出来。"} tour="review" actions={<>{isRandom ? <Chip tone="blue">随机练习</Chip> : stats && <Chip tone={isInitial ? "green" : "blue"}>{progressText(stats)}</Chip>}<Button variant="secondary" onClick={isRandom ? loadRandom : leaveSession}>{isRandom ? <><Dices size={17}/> 再抽一题</> : "切换练习"}</Button></>} />
+    <PageHeader eyebrow={<><BrainCircuit size={15}/> {isRandom ? "随机练习" : sessionCopy?.label}</>} title={isRandom ? "随机抽一题，说说看。" : isInitial ? "先看懂，再进入回忆。" : queue === "weak" ? "把难点练扎实。" : "把记忆再叫回来。"} description={isRandom ? "这次练习只提供反馈，不会影响复习排程。" : isInitial ? "这不是考试：逐条看完答案要点后，明天再进行第一次主动回忆。" : queue === "weak" ? "薄弱复习不改变排程，练好后可以把它移出队列。" : "说不完整没关系，关键是把思路调出来。"} tour="review" actions={<>{!isRandom && <Button variant="ghost" onClick={() => setFullEditorOpen(true)}><PencilLine size={17}/> 编辑</Button>}{isRandom && <Button variant="ghost" onClick={loadRandom}><Dices size={17}/> 再抽一题</Button>}<Button variant="secondary" onClick={leaveSession}>退出</Button></>} />
     <div className="review-learning-layout page-focus-content">
+    {stats && <section className="review-session-progress" aria-label={`${sessionCopy?.label}进度`}><div><span>{sessionCopy?.label}</span><strong>今日完成 {stats.completedToday} / {tagProgressTotal}</strong></div><div className="progress-track"><i style={{ width: `${tagProgressPercent}%` }} /></div></section>}
     <article ref={reviewCardRef} className="review-card">
-      <div><div className="review-question-heading"><p className="eyebrow">问题</p>{isInitial ? <Chip tone="green">首次学习</Chip> : difficulty && <span className={`difficulty-badge difficulty-${difficulty.className}`} title={`FSRS 难度 ${learning?.fsrsDifficulty?.toFixed(1)} / 10`}>难度 {difficulty.label}<small>{learning?.fsrsDifficulty?.toFixed(1)}</small></span>}</div><h2 className="review-question">{presentedQuestion}</h2></div>
+      <div><div className="review-question-heading"><p className="eyebrow">问题</p>{isInitial ? <Chip tone="green">首次学习</Chip> : difficulty && <span className={`difficulty-badge difficulty-${difficulty.className}`} title={`FSRS 难度 ${learning?.fsrsDifficulty?.toFixed(1)} / 10`}>难度 {difficulty.label}<small>{learning?.fsrsDifficulty?.toFixed(1)}</small></span>}</div><h2 className="review-question">{presentedQuestion}</h2>{activeCard.tags.length > 0 && <details className="review-card-tags" open={tagsOpen} onToggle={(event) => { const open = event.currentTarget.open; setTagExpansion((current) => ({ ...current, [activeCard.id]: open })); }}><summary>标签（{activeCard.tags.length}）</summary><div>{activeCard.tags.map((tag) => <Chip key={tag} tone="ink">#{tag}</Chip>)}</div></details>}</div>
       {isInitial ? <section className="initial-study-flow" data-tour="initial-study-flow" aria-label="首次学习步骤">
-        <div className="initial-study-intro"><div className="initial-study-orb"><GraduationCap size={24}/></div><div><p className="eyebrow">先理解，再回忆</p><h3>沿着提示，逐条看懂答案。</h3><p>每个要点先给出一个线索；点击后查看完整解释。不会评分，也不会记录为作答。</p></div></div>
         <ol className="initial-study-points">
           {activeCard.answerPoints.map((point, index) => {
             const revealed = revealedStudyPoints.includes(index);
             const pointLabel = point.role === "key" || !point.role ? studyPointLabels.get(point.id) ?? String(index + 1) : point.role === "opening" ? "开场" : "收束";
             const editMode = studyEditMode[point.id];
             const toggleStudyEditor = (nextMode: "note" | "hint") => setStudyEditMode((current) => { const next = { ...current }; if (next[point.id] === nextMode) delete next[point.id]; else next[point.id] = nextMode; return next; });
-            return <li className={`${revealed ? "revealed" : ""}${point.parentId ? " initial-study-subpoint" : ""}`} key={point.id}><div className="initial-study-point-number">{revealed ? <CheckCircle2 size={17}/> : pointLabel}</div><div><p className="eyebrow">要点 {pointLabel}</p>{revealed ? <><p className="initial-study-answer">{point.content}</p>{!point.parentId && <div className="initial-study-point-actions"><button type="button" onClick={() => toggleStudyEditor("note")}><MessageSquareText size={15}/> 批注</button><button type="button" onClick={() => toggleStudyEditor("hint")}><Lightbulb size={15}/> 编辑提示</button><button type="button" onClick={() => router.push(`/library?editCardId=${activeCard.id}`)}><PencilLine size={15}/> 编辑全部</button></div>}{!point.parentId && editMode && <label className="initial-study-inline-editor">{editMode === "note" ? "要点批注" : "回忆提示"}<textarea rows={2} value={point[editMode]} onChange={(event) => updateStudyPoint(point.id, editMode, event.target.value)} placeholder={editMode === "note" ? "记录补充、案例或待核实内容" : "用一句线索帮助下次回忆"} />{studyEditErrors[point.id] && <span className="danger">{studyEditErrors[point.id]}</span>}</label>}</> : <><p className="initial-study-hint"><Lightbulb size={16}/>{point.hint.trim() || "先用自己的话想一想这个关键点。"}</p><Button type="button" variant="secondary" onClick={() => revealStudyPoint(index)}><Eye size={16}/> 查看完整要点</Button></>}</div></li>;
+            const editorLabel = editMode === "note" ? "要点批注" : "回忆提示";
+            const editorValue = editMode ? point[editMode] : "";
+            return <li className={`${revealed ? "revealed" : ""}${point.parentId ? " initial-study-subpoint" : ""}`} key={point.id}><div className="initial-study-point-number">{revealed ? <CheckCircle2 size={17}/> : pointLabel}</div><div><p className="eyebrow">要点 {pointLabel}</p>{revealed ? <><p className="initial-study-answer">{point.content}</p>{!point.parentId && <div className="initial-study-point-actions"><button type="button" onClick={() => toggleStudyEditor("note")}><MessageSquareText size={15}/> 批注</button><button type="button" onClick={() => toggleStudyEditor("hint")}><Lightbulb size={15}/> 编辑提示</button></div>}{!point.parentId && editMode && <label className="initial-study-inline-editor">{editorLabel}<span className="initial-study-editor-current">当前{editorLabel}：{editorValue.trim() || "尚未填写"}</span><textarea rows={2} value={editorValue} onChange={(event) => updateStudyPoint(point.id, editMode, event.target.value)} placeholder={editMode === "note" ? "记录补充、案例或待核实内容" : "用一句线索帮助下次回忆"} />{studyEditErrors[point.id] && <span className="danger">{studyEditErrors[point.id]}</span>}</label>}</> : <><p className="initial-study-hint"><Lightbulb size={16}/>{point.hint.trim() || "先用自己的话想一想这个关键点。"}</p><Button type="button" variant="secondary" onClick={() => revealStudyPoint(index)}><Eye size={16}/> 查看完整要点</Button></>}</div></li>;
           })}
         </ol>
         <div className="form-actions initial-study-actions"><small>{allStudyPointsRevealed ? "全部要点已看完；完成后，第一次正式主动回忆会安排在明天上午。" : `还需查看 ${activeCard.answerPoints.length - revealedStudyPoints.length} 个要点`}</small><Button disabled={!allStudyPointsRevealed || studyBusy} onClick={() => void completeStudy()}>{studyBusy ? "正在安排复习…" : <><CheckCircle2 size={17}/> 完成首次学习</>}</Button>{studyError && <span className="danger" role="alert">{studyError}</span>}</div>
