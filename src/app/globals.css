@@ -447,7 +447,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .knowledge-card.selection-mode:focus-visible { outline: 3px solid #4caedb; outline-offset: 3px; }
 .knowledge-card.selection-mode:hover { filter: brightness(1.015) saturate(1.04); }
 @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
-  .knowledge-card:hover { box-shadow: 0 10px 0 var(--rarity-shadow); transform: perspective(1100px) translateY(-2px) rotateX(var(--card-rotate-x)) rotateY(var(--card-rotate-y)); }
+  .knowledge-card:hover, .knowledge-card[data-tilting="true"] { box-shadow: 0 10px 0 var(--rarity-shadow); transform: perspective(1100px) translateY(-2px) rotateX(var(--card-rotate-x)) rotateY(var(--card-rotate-y)); }
 }
 .card-select { display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 900; color: var(--muted); cursor: pointer; }
 .follow-up-card { padding: 18px; border: 2px solid #dfd1ff; border-bottom-width: 4px; border-radius: 16px; background: #fcfaff; }
