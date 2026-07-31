@@ -9,7 +9,7 @@ import { DesktopUpdatePrompt } from "@/components/desktop-update-notice";
 
 const nav = [
   ["/", "今日", ClipboardList],
-  ["/library", "卡片库", LibraryBig],
+  ["/library", "藏品", LibraryBig],
   ["/review", "学习", BookOpenCheck],
   ["/settings", "设置", Settings],
 ] as const;

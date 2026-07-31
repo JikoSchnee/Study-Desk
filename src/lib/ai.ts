@@ -221,7 +221,7 @@ export function parseGeneratedFollowUpCardDraft(content: string, card: Card, fol
 
 export async function generateFollowUpCardDraft(card: Card, followUpQuestion: string, context: FollowUpCardContext = {}) {
   const config = remoteModelConfig();
-  if (!config) throw new Error("请先在设置中配置模型服务，再将 AI 追问加入卡片库。");
+  if (!config) throw new Error("请先在设置中配置模型服务，再将 AI 追问加入藏品。");
   try {
     const content = await requestModel(config, {
       temperature: 0.3,

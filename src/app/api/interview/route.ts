@@ -47,7 +47,7 @@ export async function POST(request: Request) {
     try {
       const input = followUpCardDraftSchema.parse(body);
       const extension = sqlite.prepare("SELECT card_id, question, parent_turn_id FROM interview_turns WHERE id = ? AND session_id = ? AND is_extension = 1").get(input.turnId, input.sessionId) as { card_id: string; question: string; parent_turn_id: string | null } | undefined;
-      if (!extension?.parent_turn_id) return NextResponse.json({ error: "只能将本场模拟面试中的 AI 追问加入卡片库。" }, { status: 400 });
+      if (!extension?.parent_turn_id) return NextResponse.json({ error: "只能将本场模拟面试中的 AI 追问加入藏品。" }, { status: 400 });
       const parent = sqlite.prepare("SELECT answer, feedback FROM interview_turns WHERE id = ? AND session_id = ?").get(extension.parent_turn_id, input.sessionId) as { answer: string | null; feedback: string | null } | undefined;
       const card = getCard(extension.card_id);
       if (!card) return NextResponse.json({ error: "找不到追问对应的原卡。" }, { status: 404 });

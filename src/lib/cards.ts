@@ -97,7 +97,7 @@ export function createTutorialCard() {
       { id: randomUUID(), content: "把高相关资料放在前面，可以提升上下文质量和最终回答准确性。", hint: "减少噪声", note: "" },
     ],
     track: "演示", tags: ["演示", "RAG"], difficulty: 2, source: "tutorial", status: "learning", allowQuestionCollision: true,
-    note: "基础教程自动创建的演示卡；可在教程最后从卡片库归档或永久删除。",
+    note: "基础教程自动创建的演示卡；可在教程最后从藏品归档或永久删除。",
   });
 }
 

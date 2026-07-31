@@ -7,7 +7,7 @@ import { Button } from "@/components/ui";
 const steps = [
   { id: "manual", icon: PencilLine, label: "手动录入", kicker: "01 · 从一题开始", title: "手动写下一张卡", detail: "填入问题、答案要点和提示；保存后，它就进入首次学习队列。" },
   { id: "batch", icon: FileSpreadsheet, label: "批量导入", kicker: "02 · 把资料带进来", title: "批量整理已有资料", detail: "上传 CSV 或 XLSX，映射字段、逐张预览，再确认导入。" },
-  { id: "library", icon: LibraryBig, label: "卡片库", kicker: "03 · 随时翻出来", title: "在卡片库继续打磨", detail: "按类型和标签查找内容，查看学习轨迹，持续整理自己的知识。" },
+  { id: "library", icon: LibraryBig, label: "藏品", kicker: "03 · 随时翻出来", title: "在藏品继续打磨", detail: "按类型和标签查找内容，查看学习轨迹，持续整理自己的知识。" },
   { id: "review", icon: BookOpenCheck, label: "学习与复习", kicker: "04 · 练成能说的话", title: "学习一次，按时复习", detail: "先理解并复述新题；之后按计划主动回忆，让知识留下来。" },
 ] as const;
 
@@ -30,7 +30,7 @@ function StepPreview({ step, animationKey }: { step: TutorialStepId; animationKe
       <div className="mini-batch-cards"><i /><i /><i /></div>
     </div>}
     {step === "library" && <div className="mini-window mini-library">
-      <div className="mini-window-bar"><span /><span /><span /><b>我的卡片库</b></div>
+      <div className="mini-window-bar"><span /><span /><span /><b>我的藏品</b></div>
       <div className="mini-search"><span>⌕</span><i>搜索卡片…</i><b>Java 后端⌄</b></div>
       <div className="mini-library-list"><div><em>JVM</em><strong>垃圾回收有哪些算法？</strong><small>3 个答案要点</small></div><div><em>SQL</em><strong>索引为什么会失效？</strong><small>2 天后复习</small></div><div><em>网络</em><strong>TCP 三次握手</strong><small>已学习</small></div></div>
       <div className="mini-library-cursor" />
