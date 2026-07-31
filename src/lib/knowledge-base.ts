@@ -2,9 +2,9 @@ import "server-only";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { sqlite } from "@/lib/db";
+import { getAppSettings } from "@/lib/settings";
 import type { Card } from "@/lib/types";
 
-export const OBSIDIAN_README = "/Users/jikoschnee/Library/Mobile Documents/iCloud~md~obsidian/Documents/Jiko/B-AGENT/README.md";
 const agentTerms = ["llm", "rag", "agent", "prompt", "tool", "memory", "evaluation", "embedding", "token", "transformer", "模型", "检索", "智能体", "提示", "工具", "评估"];
 
 export type KnowledgeProposalStatus = "pending" | "confirmed" | "completed";
@@ -86,7 +86,10 @@ function latestRowsByCard() {
 }
 
 export function refreshKnowledgeProposals(cards: Card[]) {
-  const content = existsSync(OBSIDIAN_README) ? readFileSync(OBSIDIAN_README, "utf8") : "";
+  const knowledgeBasePath = getAppSettings().knowledgeBasePath.trim();
+  if (!knowledgeBasePath) throw new Error("请先在设置中选择你的 Obsidian 知识库 Markdown 文件。");
+  if (!existsSync(knowledgeBasePath)) throw new Error("已配置的知识库文件不存在或当前无法访问，请在设置中检查路径。");
+  const content = readFileSync(knowledgeBasePath, "utf8");
   const fileHash = hash(content);
   const existing = latestRowsByCard();
   const now = new Date().toISOString();

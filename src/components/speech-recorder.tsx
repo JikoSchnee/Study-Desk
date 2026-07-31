@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Mic, Square } from "lucide-react";
+import { Keyboard, Mic, Square } from "lucide-react";
 import { Button } from "@/components/ui";
 
 declare global { interface Window { webkitSpeechRecognition?: new () => SpeechRecognition; SpeechRecognition?: new () => SpeechRecognition; } }
@@ -10,6 +10,8 @@ interface SpeechRecognition extends EventTarget { lang: string; continuous: bool
 export function SpeechRecorder({ onTranscript }: { onTranscript: (value: string) => void }) {
   const [recording, setRecording] = useState(false);
   const recognition = useRef<SpeechRecognition | null>(null);
+  const isWindowsDesktop = typeof window !== "undefined" && window.mockInterviewDesktop?.platform === "win32";
+  if (isWindowsDesktop) return <span className="speech-fallback" role="note"><Keyboard size={16}/> Windows 桌面版暂不支持稳定的语音识别，请使用文本作答。</span>;
   const toggle = () => {
     if (recording) { recognition.current?.stop(); setRecording(false); return; }
     const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;

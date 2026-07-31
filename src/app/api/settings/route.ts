@@ -19,6 +19,7 @@ export async function PUT(request: Request) {
       embeddingModelSource: z.enum(["automatic", "offline"]).default("automatic"),
       stabilityRarityPreset: z.enum(["fast", "memory-cycle", "long-term"]).default("memory-cycle"),
       tagDisplayLanguage: z.enum(["zh", "en", "both"]).default("zh"),
+      knowledgeBasePath: z.string().trim().max(4096).default(""),
     }).parse(await request.json());
     const { saveAppSettings } = await import("@/lib/settings");
     return NextResponse.json(saveAppSettings(input));

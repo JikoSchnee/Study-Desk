@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { Download, ExternalLink, FlaskConical, KeyRound, Mic2, RefreshCw, RotateCcw, Save, ShieldCheck, SlidersHorizontal, Sparkles, Upload } from "lucide-react";
+import { Download, ExternalLink, FilePenLine, FlaskConical, KeyRound, Mic2, RefreshCw, RotateCcw, Save, ShieldCheck, SlidersHorizontal, Sparkles, Upload } from "lucide-react";
 import { Button, Panel } from "@/components/ui";
 import { PageLayout } from "@/components/page-layout";
 import { rarityPresetOptions, type StabilityRarityPreset } from "@/lib/card-tiers";
@@ -37,6 +37,7 @@ export default function SettingsPage() {
   const [stabilityRarityPreset, setStabilityRarityPreset] = useState<StabilityRarityPreset>("memory-cycle");
   const [tagDisplayLanguage, setTagDisplayLanguage] = useState<TagDisplayLanguage>("zh");
   const [notice, setNotice] = useState("");
+  const [knowledgeBasePath, setKnowledgeBasePath] = useState("");
   const [baseUrl, setBaseUrl] = useState(""); const [model, setModel] = useState("");
   const [provider, setProvider] = useState<ModelProviderId>("custom"); const [savedProvider, setSavedProvider] = useState<ModelProviderId>("custom");
   const [apiKey, setApiKey] = useState(""); const [apiKeyConfigured, setApiKeyConfigured] = useState(false); const [clearApiKey, setClearApiKey] = useState(false);
@@ -51,7 +52,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     Promise.all([fetch("/api/settings").then((response) => response.json()), fetch("/api/settings/environment").then((response) => response.json())]).then(([settings, environment]) => {
-      setDailyInitialTarget(settings.dailyInitialTarget ?? 5); setDailyReviewTarget(settings.dailyReviewTarget ?? 10); setAnswerComparisonMode(settings.answerComparisonMode === "llm" ? "llm" : "embedding"); if (!modelSourceChangedByUser.current) setEmbeddingModelSource(settings.embeddingModelSource === "offline" ? "offline" : "automatic"); setStabilityRarityPreset(["fast", "memory-cycle", "long-term"].includes(settings.stabilityRarityPreset) ? settings.stabilityRarityPreset : "memory-cycle"); setTagDisplayLanguage(settings.tagDisplayLanguage === "en" || settings.tagDisplayLanguage === "both" ? settings.tagDisplayLanguage : "zh");
+      setDailyInitialTarget(settings.dailyInitialTarget ?? 5); setDailyReviewTarget(settings.dailyReviewTarget ?? 10); setAnswerComparisonMode(settings.answerComparisonMode === "llm" ? "llm" : "embedding"); if (!modelSourceChangedByUser.current) setEmbeddingModelSource(settings.embeddingModelSource === "offline" ? "offline" : "automatic"); setStabilityRarityPreset(["fast", "memory-cycle", "long-term"].includes(settings.stabilityRarityPreset) ? settings.stabilityRarityPreset : "memory-cycle"); setTagDisplayLanguage(settings.tagDisplayLanguage === "en" || settings.tagDisplayLanguage === "both" ? settings.tagDisplayLanguage : "zh"); setKnowledgeBasePath(typeof settings.knowledgeBasePath === "string" ? settings.knowledgeBasePath : "");
       const config = environment as EnvironmentSettings; setProvider(config.provider ?? "custom"); setSavedProvider(config.provider ?? "custom"); setBaseUrl(config.baseUrl ?? ""); setModel(config.model ?? ""); setApiKeyConfigured(Boolean(config.apiKeyConfigured));
     });
   }, []);
@@ -76,7 +77,7 @@ export default function SettingsPage() {
     return () => { active = false; window.clearInterval(timer); };
   }, []);
 
-  const save = async () => { await fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dailyInitialTarget, dailyReviewTarget, answerComparisonMode, embeddingModelSource, stabilityRarityPreset, tagDisplayLanguage }) }); setNotice("基本设置已保存。"); };
+  const save = async () => { await fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dailyInitialTarget, dailyReviewTarget, answerComparisonMode, embeddingModelSource, stabilityRarityPreset, tagDisplayLanguage, knowledgeBasePath }) }); setNotice("基本设置已保存。"); };
   const checkForUpdates = async () => { if (!window.mockInterviewDesktop) return; setCheckingUpdate(true); try { setUpdateResult(await window.mockInterviewDesktop.updates.check() as UpdateCheckResult); setLastCheckedAt(new Date()); } catch { setUpdateResult({ state: "error", currentVersion: "当前版本", message: "检查更新失败，请稍后重试。" }); } finally { setCheckingUpdate(false); } };
   const saveEnvironment = async () => { setSavingEnvironment(true); setEnvironmentNotice(""); try { const response = await fetch("/api/settings/environment", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider, baseUrl, model, apiKey, clearApiKey }) }); const data = await response.json() as EnvironmentSettings & { error?: string }; if (!response.ok || data.error) throw new Error(data.error ?? "无法保存本地环境配置。"); setApiKey(""); setClearApiKey(false); setProvider(data.provider); setSavedProvider(data.provider); setBaseUrl(data.baseUrl); setModel(data.model); setApiKeyConfigured(data.apiKeyConfigured); setEnvironmentNotice("模型配置已保存到 .env.local。"); } catch (error) { setEnvironmentNotice(error instanceof Error ? error.message : "无法保存本地环境配置。"); } finally { setSavingEnvironment(false); } };
   const chooseProvider = (next: ModelProviderId) => { setProvider(next); setClearApiKey(false); if (next !== "custom") { setBaseUrl(modelProviders[next].baseUrl); setModel(modelProviders[next].model); } };
@@ -105,5 +106,6 @@ export default function SettingsPage() {
       </section>
       <section className="settings-auxiliary-grid" aria-label="辅助功能"><Panel className="test-features-panel"><p className="eyebrow"><FlaskConical size={15}/> 测试功能</p><h2>开发中的功能</h2><p className="muted-copy">以下功能仍在开发中，可能会调整或不稳定；使用前建议先下载备份。</p><div className="test-feature-actions"><Link className="button secondary" href="/interview"><Mic2 size={17}/> 进入模拟面试</Link><Link className="button outline" href="/knowledge-base"><Sparkles size={17}/> 进入知识库</Link>{restartPlanConfirming ? <><Button type="button" variant="warning" disabled={restartingPlan} onClick={() => void restartPlan()}><RotateCcw size={16}/>{restartingPlan ? "正在重启计划…" : "确认重启计划"}</Button><Button type="button" variant="ghost" disabled={restartingPlan} onClick={() => setRestartPlanConfirming(false)}>取消</Button></> : <Button type="button" variant="warning" className="restart-plan-button" data-tooltip="跳过之前未完成的每日任务，按当前每日目标从今天重新安排；不会删除卡片、学习记录或复习排程。" disabled={restartingPlan} onClick={() => setRestartPlanConfirming(true)}><RotateCcw size={16}/>重启计划</Button>}</div>{restartPlanNotice && <p className="muted-copy" role="status">{restartPlanNotice}</p>}</Panel></section>
     </div>
+      <section className="knowledge-base-settings-section" aria-label="知识库设置"><Panel className="knowledge-base-settings-panel"><p className="eyebrow"><FilePenLine size={15}/> Obsidian 知识库</p><h2>选择知识库文件</h2><p className="muted-copy">填写要分析的 Markdown 文件完整路径。应用只读取它来判断建议是否已手动写入，绝不会直接修改原文件。</p><label className="field"><span>Markdown 文件路径</span><input value={knowledgeBasePath} onChange={(event) => setKnowledgeBasePath(event.target.value)} placeholder="例如 C:\\Users\\你\\Documents\\Obsidian\\README.md" autoCapitalize="none" spellCheck={false}/><span className="field-help">留空会停用知识库分析。</span></label><div className="form-actions"><Button type="button" variant="secondary" onClick={save}><Save size={16}/> 保存知识库位置</Button></div></Panel></section>
   </PageLayout>;
 }

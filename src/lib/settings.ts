@@ -10,9 +10,10 @@ export type AppSettings = {
   embeddingModelSource: EmbeddingModelSource;
   stabilityRarityPreset: StabilityRarityPreset;
   tagDisplayLanguage: TagDisplayLanguage;
+  knowledgeBasePath: string;
 };
 
-const defaults: AppSettings = { dailyInitialTarget: 5, dailyReviewTarget: 10, answerComparisonMode: "embedding", embeddingModelSource: "automatic", stabilityRarityPreset: "memory-cycle", tagDisplayLanguage: "zh" };
+const defaults: AppSettings = { dailyInitialTarget: 5, dailyReviewTarget: 10, answerComparisonMode: "embedding", embeddingModelSource: "automatic", stabilityRarityPreset: "memory-cycle", tagDisplayLanguage: "zh", knowledgeBasePath: "" };
 
 export function getAppSettings(): AppSettings {
   const rows = sqlite.prepare("SELECT key, value FROM settings").all() as Array<{ key: string; value: string }>;
@@ -25,6 +26,7 @@ export function getAppSettings(): AppSettings {
     embeddingModelSource: values.embeddingModelSource === "offline" ? "offline" : "automatic",
     stabilityRarityPreset: rarityPreset(values.stabilityRarityPreset),
     tagDisplayLanguage: values.tagDisplayLanguage === "en" || values.tagDisplayLanguage === "both" ? values.tagDisplayLanguage : "zh",
+    knowledgeBasePath: values.knowledgeBasePath ?? defaults.knowledgeBasePath,
   };
 }
 
@@ -36,6 +38,7 @@ export function saveAppSettings(input: AppSettings) {
   statement.run("embeddingModelSource", input.embeddingModelSource);
   statement.run("stabilityRarityPreset", input.stabilityRarityPreset);
   statement.run("tagDisplayLanguage", input.tagDisplayLanguage);
+  statement.run("knowledgeBasePath", input.knowledgeBasePath);
   return input;
 }
 

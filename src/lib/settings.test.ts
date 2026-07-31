@@ -11,7 +11,7 @@ vi.mock("./db", () => ({
   },
 }));
 
-import { getAppSettings, saveEmbeddingModelSource } from "./settings";
+import { getAppSettings, saveAppSettings, saveEmbeddingModelSource } from "./settings";
 
 describe("embedding model source setting", () => {
   it("defaults existing installations to automatic downloads", () => {
@@ -24,5 +24,11 @@ describe("embedding model source setting", () => {
     expect(getAppSettings().embeddingModelSource).toBe("offline");
     expect(saveEmbeddingModelSource("offline")).toBe("offline");
     expect(database.run).toHaveBeenCalledWith("embeddingModelSource", "offline");
+  });
+
+  it("persists a user-selected knowledge base path", () => {
+    const settings = { ...getAppSettings(), knowledgeBasePath: "C:\\Users\\Learner\\Notes\\README.md" };
+    expect(saveAppSettings(settings).knowledgeBasePath).toBe(settings.knowledgeBasePath);
+    expect(database.run).toHaveBeenCalledWith("knowledgeBasePath", settings.knowledgeBasePath);
   });
 });
