@@ -42,4 +42,10 @@ export function normalizeTags(value: string[]) {
   }, []);
 }
 
+/** Ensures a card can always be found through its current knowledge-base type. */
+export function withTrackTag(track: string, tags: string[]) {
+  const normalizedTrack = track.trim();
+  return normalizeTags(normalizedTrack ? [...tags, normalizedTrack] : tags);
+}
+
 export function toTags(value: string[]) { return JSON.stringify(normalizeTags(value)); }

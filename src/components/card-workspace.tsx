@@ -8,6 +8,7 @@ import { SearchableSelect } from "@/components/searchable-select";
 import { Button, Chip, Panel } from "@/components/ui";
 import { emptyMapping, splitTags, type AnswerPoint, type ImportColumnMapping, type ImportPreviewRow } from "@/lib/import";
 import { createRelatedCardDraft } from "@/lib/related-card-draft";
+import { withTrackTag } from "@/lib/utils";
 import type { Card, CardRelation, CardRelationType, FollowUpCardDraft, QuestionVariant } from "@/lib/types";
 
 type CardDraft = { question: string; questionVariants: QuestionVariant[]; relations: CardRelation[]; answerPoints: AnswerPoint[]; note: string; track: string; tags: string; source: string };
@@ -71,6 +72,12 @@ export function CardWorkspace({ initialMode, onClose, onComplete }: CardWorkspac
     if (track !== "Agent") setDraft((current) => current.question || current.answerPoints.some((item) => item.content) ? current : { ...current, track });
   }, []);
   useEffect(() => {
+    setDraft((current) => {
+      const tags = withTrackTag(current.track, splitTags(current.tags)).join(", ");
+      return tags === current.tags ? current : { ...current, tags };
+    });
+  }, [draft.track]);
+  useEffect(() => {
     if (!saveFeedback) return;
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const focusFeedback = () => saveFeedbackRef.current?.focus({ preventScroll: true });
@@ -125,7 +132,11 @@ export function CardWorkspace({ initialMode, onClose, onComplete }: CardWorkspac
   const resetImport = () => { setFile(null); setSheets([]); setSheetName(""); setMapping(emptyMapping); setPreviewRows([]); setIncluded(new Set()); setDragging(false); };
   const inspectFile = async (selected: File) => { setImportBusy(true); setNotice(""); const form = new FormData(); form.set("file", selected); form.set("phase", "inspect"); const response = await fetch("/api/cards/import/parse", { method: "POST", body: form }); const data = await response.json(); setImportBusy(false); if (!response.ok) { setNotice(data.error ?? "无法读取文件。"); return; } const first = data.sheets[0] as SheetInfo | undefined; setFile(selected); setSheets(data.sheets); setSheetName(first?.name ?? ""); setMapping(first?.mapping ?? emptyMapping); setPreviewRows([]); };
   const previewFile = async () => { if (!file || !sheetName) return; setImportBusy(true); const form = new FormData(); form.set("file", file); form.set("phase", "preview"); form.set("sheetName", sheetName); form.set("mapping", JSON.stringify(mapping)); const response = await fetch("/api/cards/import/parse", { method: "POST", body: form }); const data = await response.json(); setImportBusy(false); if (!response.ok) { setNotice(data.error ?? "无法生成预览。"); return; } setPreviewRows(data.preview); setIncluded(new Set(data.preview.filter((row: ImportPreviewRow) => row.status === "valid").map((row: ImportPreviewRow) => row.id))); if (data.truncated) setNotice("文件超过 500 行，仅显示前 500 行供导入。"); };
-  const updateRow = (id: string, change: Partial<ImportPreviewRow["card"]>) => setPreviewRows((rows) => rows.map((row) => row.id !== id ? row : { ...row, status: change.question !== undefined || change.answerPoints !== undefined ? "valid" : row.status, reason: change.question !== undefined || change.answerPoints !== undefined ? undefined : row.reason, card: { ...row.card, ...change } }));
+  const updateRow = (id: string, change: Partial<ImportPreviewRow["card"]>) => setPreviewRows((rows) => rows.map((row) => {
+    if (row.id !== id) return row;
+    const track = change.track ?? row.card.track;
+    return { ...row, status: change.question !== undefined || change.answerPoints !== undefined ? "valid" : row.status, reason: change.question !== undefined || change.answerPoints !== undefined ? undefined : row.reason, card: { ...row.card, ...change, tags: change.track === undefined ? change.tags ?? row.card.tags : withTrackTag(track, row.card.tags) } };
+  }));
   const commitImport = async () => { const chosen = previewRows.filter((row) => included.has(row.id)).map((row) => row.card).filter((card) => card.question.trim() && card.answerPoints.some((item) => item.content.trim())); if (!chosen.length) { setNotice("请至少保留一张含问题和答案要点的卡片。 "); return; } setImportBusy(true); const response = await fetch("/api/cards/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cards: chosen }) }); const data = await response.json(); setImportBusy(false); if (!response.ok) { setNotice(data.error ?? "导入失败。"); return; } const message = `已导入 ${data.accepted.length} 张卡片${data.rejected.length ? `，跳过 ${data.rejected.length} 条重复或无效内容` : ""}。`; resetImport(); await load(); onComplete?.(message, "import"); };
   const generateVariants = async (question: string, answerPoints: AnswerPoint[], existing: QuestionVariant[]) => { if (question.trim().length < 3 || !answerPoints.some((item) => item.content.trim())) { setNotice("请先填写主问题和至少一条答案要点，再让 AI 补充问法。"); return; } setAiBusy(true); setNotice(""); try { const response = await fetch("/api/cards/question-variants", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question, answerPoints: answerPoints.map((item) => item.content.trim()).filter(Boolean), existingQuestions: [...existing.map((item) => item.content), ...aiCandidates.map((item) => item.content)] }) }); const data = await response.json(); if (!response.ok) { if (data.requiresConfiguration) setNeedsLLMConfiguration(true); throw new Error(data.error ?? "暂时无法生成问法。"); } setAiCandidates((items) => [...items, ...data.candidates]); } catch (error) { setNotice(error instanceof Error ? error.message : "暂时无法生成问法。"); } finally { setAiBusy(false); } };
 

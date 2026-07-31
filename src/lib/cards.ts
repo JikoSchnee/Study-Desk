@@ -1,7 +1,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { sqlite } from "@/lib/db";
-import { parseTags, toTags } from "@/lib/utils";
+import { parseTags, toTags, withTrackTag } from "@/lib/utils";
 import { answerFromPoints, answerPointHierarchyError, answerPointsFromStored, answerPointsToJson, hasCoreAnswerPoint, previewImport } from "@/lib/import";
 import { allQuestionTexts, findQuestionCollision, normalizeQuestionVariants, questionVariantsFromStored, questionVariantsToJson } from "@/lib/question-variants";
 import { findSimilarImportQuestions } from "@/lib/import-similarity";
@@ -77,11 +77,12 @@ export function createCard(input: CardInput) {
   if (!hasCoreAnswerPoint(answerPoints)) throw new Error("请至少填写一条核心答案要点。");
   const answer = answerFromPoints(answerPoints);
   const question = input.question.trim().replace(/\s+/g, " ");
+  const track = input.track.trim();
   const questionVariants = normalizeQuestionVariants(question, input.questionVariants ?? []);
   const collision = findQuestionCollision(question, questionVariants, existingQuestionTexts());
   if (collision && !input.allowQuestionCollision) throw new Error(`问法“${collision}”已存在于其他卡片。`);
   sqlite.prepare("INSERT INTO cards (id, question, question_variants, answer, answer_points, note, track, tags, difficulty, source, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .run(id, question, questionVariantsToJson(question, questionVariants), answer, answerPointsToJson(answerPoints), input.note?.trim() ?? "", input.track, toTags(resolveTagKeys(input.tags)), input.difficulty, input.source ?? null, input.status ?? "learning", now, now);
+    .run(id, question, questionVariantsToJson(question, questionVariants), answer, answerPointsToJson(answerPoints), input.note?.trim() ?? "", track, toTags(resolveTagKeys(withTrackTag(track, input.tags))), input.difficulty, input.source ?? null, input.status ?? "learning", now, now);
   replaceCardRelations(id, relations);
   return getCard(id)!;
 }
@@ -106,6 +107,7 @@ export function updateCard(id: string, input: Pick<Card, "question" | "questionV
   const relations = normalizeCardRelations(input.relations, id);
   assertRelatedCardsExist(relations);
   const question = input.question.trim().replace(/\s+/g, " ");
+  const track = input.track.trim();
   const questionVariants = normalizeQuestionVariants(question, input.questionVariants);
   const answerPoints = input.answerPoints.filter((point) => point.content.trim());
   const hierarchyError = answerPointHierarchyError(answerPoints);
@@ -114,7 +116,7 @@ export function updateCard(id: string, input: Pick<Card, "question" | "questionV
   const collision = findQuestionCollision(question, questionVariants, existingQuestionTexts(id));
   if (collision && card.source !== "tutorial") throw new Error(`问法“${collision}”已存在于其他卡片。`);
   sqlite.prepare("UPDATE cards SET question = ?, question_variants = ?, answer = ?, answer_points = ?, note = ?, track = ?, tags = ?, difficulty = ?, updated_at = ? WHERE id = ?")
-    .run(question, questionVariantsToJson(question, questionVariants), answerFromPoints(answerPoints), answerPointsToJson(answerPoints), input.note.trim(), input.track, toTags(resolveTagKeys(input.tags)), input.difficulty, new Date().toISOString(), id);
+    .run(question, questionVariantsToJson(question, questionVariants), answerFromPoints(answerPoints), answerPointsToJson(answerPoints), input.note.trim(), track, toTags(resolveTagKeys(withTrackTag(track, input.tags))), input.difficulty, new Date().toISOString(), id);
   replaceCardRelations(id, relations);
   return getCard(id);
 }
@@ -133,7 +135,10 @@ export function updateCardsBulk(ids: string[], action: "archive" | "restore" | "
       if (!card) continue;
       if (action === "archive") sqlite.prepare("UPDATE cards SET status = 'archived', updated_at = ? WHERE id = ?").run(now, id);
       if (action === "restore") sqlite.prepare("UPDATE cards SET status = CASE WHEN EXISTS (SELECT 1 FROM review_state WHERE card_id = ?) THEN 'review' ELSE 'learning' END, updated_at = ? WHERE id = ?").run(id, now, id);
-      if (action === "move" && typeof value === "string" && value.trim()) sqlite.prepare("UPDATE cards SET track = ?, updated_at = ? WHERE id = ?").run(value.trim(), now, id);
+      if (action === "move" && typeof value === "string" && value.trim()) {
+        const track = value.trim();
+        sqlite.prepare("UPDATE cards SET track = ?, tags = ?, updated_at = ? WHERE id = ?").run(track, toTags(resolveTagKeys(withTrackTag(track, card.tags))), now, id);
+      }
       if (action === "addTags" && Array.isArray(value)) sqlite.prepare("UPDATE cards SET tags = ?, updated_at = ? WHERE id = ?").run(toTags([...new Set([...card.tags, ...resolveTagKeys(value)])]), now, id);
     }
   });
