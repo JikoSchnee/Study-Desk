@@ -6,6 +6,7 @@ import { Download, ExternalLink, FlaskConical, KeyRound, Mic2, RefreshCw, Rotate
 import { Button, Panel } from "@/components/ui";
 import { PageLayout } from "@/components/page-layout";
 import { rarityPresetOptions, type StabilityRarityPreset } from "@/lib/card-tiers";
+import { fetchJson, LocalApiError, readJsonResponse } from "@/lib/client-api";
 import { modelProviders, type ModelProviderId } from "@/lib/model-providers";
 import type { AnswerComparisonMode, EmbeddingModelSource, TagDisplayLanguage } from "@/lib/types";
 import { ReleaseNotes, type UpdateCheckResult, useDesktopUpdate } from "@/components/desktop-update-notice";
@@ -15,18 +16,6 @@ type LocalEmbeddingModelStatus = { state: "pending" | "downloading" | "verifying
 const CUSTOM_MODEL_OPTION = "__custom_model__";
 
 function sizeLabel(bytes: number) { return bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`; }
-
-async function readJsonResponse<T extends { error?: string }>(response: Response, fallback: string): Promise<T> {
-  const body = await response.text();
-  let data: T;
-  try { data = JSON.parse(body) as T; }
-  catch {
-    const detail = response.headers.get("content-type")?.includes("text/html") ? "本地服务返回了错误页面。" : "本地服务返回了无法识别的数据。";
-    throw new Error(`${fallback}（HTTP ${response.status}）：${detail}`);
-  }
-  if (!response.ok) throw new Error(data.error ?? `${fallback}（HTTP ${response.status}）。`);
-  return data;
-}
 
 export default function SettingsPage() {
   const { updateResult, setUpdateResult, lastCheckedAt, setLastCheckedAt } = useDesktopUpdate();
@@ -50,44 +39,48 @@ export default function SettingsPage() {
   const modelSourceChangedByUser = useRef(false);
 
   useEffect(() => {
-    Promise.all([fetch("/api/settings").then((response) => response.json()), fetch("/api/settings/environment").then((response) => response.json())]).then(([settings, environment]) => {
-      setDailyInitialTarget(settings.dailyInitialTarget ?? 5); setDailyReviewTarget(settings.dailyReviewTarget ?? 10); setAnswerComparisonMode(settings.answerComparisonMode === "llm" ? "llm" : "embedding"); if (!modelSourceChangedByUser.current) setEmbeddingModelSource(settings.embeddingModelSource === "offline" ? "offline" : "automatic"); setStabilityRarityPreset(["fast", "memory-cycle", "long-term"].includes(settings.stabilityRarityPreset) ? settings.stabilityRarityPreset : "memory-cycle"); setTagDisplayLanguage(settings.tagDisplayLanguage === "en" || settings.tagDisplayLanguage === "both" ? settings.tagDisplayLanguage : "zh");
-      const config = environment as EnvironmentSettings; setProvider(config.provider ?? "custom"); setSavedProvider(config.provider ?? "custom"); setBaseUrl(config.baseUrl ?? ""); setModel(config.model ?? ""); setApiKeyConfigured(Boolean(config.apiKeyConfigured));
-    });
+    Promise.all([
+      fetchJson<{ dailyInitialTarget?: number; dailyReviewTarget?: number; answerComparisonMode?: string; embeddingModelSource?: string; stabilityRarityPreset?: string; tagDisplayLanguage?: string }>("/api/settings", { label: "读取基本设置" }),
+      fetchJson<EnvironmentSettings>("/api/settings/environment", { label: "读取模型配置" }),
+    ]).then(([settings, environment]) => {
+      const rarity = settings.stabilityRarityPreset;
+      setDailyInitialTarget(settings.dailyInitialTarget ?? 5); setDailyReviewTarget(settings.dailyReviewTarget ?? 10); setAnswerComparisonMode(settings.answerComparisonMode === "llm" ? "llm" : "embedding"); if (!modelSourceChangedByUser.current) setEmbeddingModelSource(settings.embeddingModelSource === "offline" ? "offline" : "automatic"); setStabilityRarityPreset(rarity === "fast" || rarity === "long-term" || rarity === "memory-cycle" ? rarity : "memory-cycle"); setTagDisplayLanguage(settings.tagDisplayLanguage === "en" || settings.tagDisplayLanguage === "both" ? settings.tagDisplayLanguage : "zh");
+      setProvider(environment.provider ?? "custom"); setSavedProvider(environment.provider ?? "custom"); setBaseUrl(environment.baseUrl ?? ""); setModel(environment.model ?? ""); setApiKeyConfigured(Boolean(environment.apiKeyConfigured));
+    }).catch((error) => setNotice(error instanceof Error ? error.message : "无法读取设置。"));
   }, []);
   useEffect(() => { setIsDesktop(Boolean(window.mockInterviewDesktop)); }, []);
   useEffect(() => {
     let active = true;
     let failures = 0;
     const readStatus = async () => {
-      const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), 10_000);
       try {
-        const response = await fetch("/api/settings/prewarm", { cache: "no-store", signal: controller.signal });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const status = await fetchJson<LocalEmbeddingModelStatus>("/api/settings/prewarm", { cache: "no-store", timeoutMs: 10_000, label: "读取 bge-m3 状态" });
         failures = 0;
-        if (active) setEmbeddingStatus(await response.json() as LocalEmbeddingModelStatus);
-      } catch {
+        if (active) setEmbeddingStatus(status);
+      } catch (error) {
         failures += 1;
-        if (active && failures >= 3) setEmbeddingStatus((current) => ({ ...current, state: "error", onnxState: "pending", error: "本地服务未响应，无法确认 bge-m3 状态。请重启应用后重试。" }));
-      } finally { window.clearTimeout(timeout); }
+        if (active && failures >= 3) {
+          const serviceResponded = error instanceof LocalApiError && (error.kind === "http" || error.kind === "invalid-response");
+          setEmbeddingStatus((current) => ({ ...current, state: "error", onnxState: "pending", error: serviceResponded ? error.message : "本地服务未响应，无法确认 bge-m3 状态。请重启应用后重试。" }));
+        }
+      }
     };
     void readStatus(); const timer = window.setInterval(() => { void readStatus(); }, 1_000);
     return () => { active = false; window.clearInterval(timer); };
   }, []);
 
-  const save = async () => { await fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dailyInitialTarget, dailyReviewTarget, answerComparisonMode, embeddingModelSource, stabilityRarityPreset, tagDisplayLanguage }) }); setNotice("基本设置已保存。"); };
+  const save = async () => { try { await fetchJson("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dailyInitialTarget, dailyReviewTarget, answerComparisonMode, embeddingModelSource, stabilityRarityPreset, tagDisplayLanguage }), label: "保存基本设置" }); setNotice("基本设置已保存。"); } catch (error) { setNotice(error instanceof Error ? error.message : "无法保存基本设置。"); } };
   const checkForUpdates = async () => { if (!window.mockInterviewDesktop) return; setCheckingUpdate(true); try { setUpdateResult(await window.mockInterviewDesktop.updates.check() as UpdateCheckResult); setLastCheckedAt(new Date()); } catch { setUpdateResult({ state: "error", currentVersion: "当前版本", message: "检查更新失败，请稍后重试。" }); } finally { setCheckingUpdate(false); } };
-  const saveEnvironment = async () => { setSavingEnvironment(true); setEnvironmentNotice(""); try { const response = await fetch("/api/settings/environment", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider, baseUrl, model, apiKey, clearApiKey }) }); const data = await response.json() as EnvironmentSettings & { error?: string }; if (!response.ok || data.error) throw new Error(data.error ?? "无法保存本地环境配置。"); setApiKey(""); setClearApiKey(false); setProvider(data.provider); setSavedProvider(data.provider); setBaseUrl(data.baseUrl); setModel(data.model); setApiKeyConfigured(data.apiKeyConfigured); setEnvironmentNotice("模型配置已保存到 .env.local。"); } catch (error) { setEnvironmentNotice(error instanceof Error ? error.message : "无法保存本地环境配置。"); } finally { setSavingEnvironment(false); } };
+  const saveEnvironment = async () => { setSavingEnvironment(true); setEnvironmentNotice(""); try { const data = await fetchJson<EnvironmentSettings>("/api/settings/environment", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider, baseUrl, model, apiKey, clearApiKey }), label: "保存模型配置" }); setApiKey(""); setClearApiKey(false); setProvider(data.provider); setSavedProvider(data.provider); setBaseUrl(data.baseUrl); setModel(data.model); setApiKeyConfigured(data.apiKeyConfigured); setEnvironmentNotice("模型配置已保存到 .env.local。"); } catch (error) { setEnvironmentNotice(error instanceof Error ? error.message : "无法保存本地环境配置。"); } finally { setSavingEnvironment(false); } };
   const chooseProvider = (next: ModelProviderId) => { setProvider(next); setClearApiKey(false); if (next !== "custom") { setBaseUrl(modelProviders[next].baseUrl); setModel(modelProviders[next].model); } };
   const preset = modelProviders[provider]; const keyConfiguredForSelection = apiKeyConfigured && provider === savedProvider; const usesCustomModel = provider !== "custom" && !preset.models.some((item) => item.id === model); const selectedModel = preset.models.find((item) => item.id === model);
   const chooseModel = (next: string) => { if (next === CUSTOM_MODEL_OPTION) { setModel((current) => preset.models.some((item) => item.id === current) ? "" : current); return; } setModel(next); };
   const downloadBackup = async () => { const response = await fetch("/api/backup"); if (!response.ok) await readJsonResponse(response, "无法创建备份"); const blob = await response.blob(); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = `mock-interview-backup-${new Date().toISOString().slice(0, 10)}.json`; link.click(); URL.revokeObjectURL(url); };
   const inspectBackup = async (file: File) => { try { const backup = JSON.parse(await file.text()); const response = await fetch("/api/backup/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "preview", backup }) }); const data = await readJsonResponse<{ error?: string; preview: { counts: Record<string, number>; cardConflicts: number } }>(response, "无法读取备份"); setBackupPayload(backup); setBackupPreview(data.preview); setBackupNotice("备份已验证；选择合并或替换后才会写入本机数据。"); } catch (error) { setBackupPayload(null); setBackupPreview(null); setBackupNotice(error instanceof Error ? error.message : "无法读取备份。"); } };
   const restoreBackup = async (mode: "merge" | "replace") => { if (!backupPayload) return; try { if (mode === "replace" && !window.confirm("替换会清除本机现有训练数据。请确认你已下载当前备份。")) return; if (mode === "replace") await downloadBackup(); const response = await fetch("/api/backup/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "restore", backup: backupPayload, mode }) }); await readJsonResponse<{ error?: string; ok: boolean }>(response, "恢复备份失败"); setBackupNotice("恢复完成，页面即将刷新。"); window.setTimeout(() => window.location.reload(), 700); } catch (error) { setBackupNotice(error instanceof Error ? error.message : "恢复备份失败。"); } };
-  const redownloadEmbeddingModel = async () => { setWarmingModel(true); setNotice("已清理旧缓存，正在后台重新下载 bge-m3。"); try { const response = await fetch("/api/settings/prewarm", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ force: true }) }); const data = await response.json() as LocalEmbeddingModelStatus & { error?: string }; if (!response.ok) throw new Error(data.error ?? "重新下载失败。"); setEmbeddingStatus(data); } catch (error) { setNotice(error instanceof Error ? error.message : "重新下载失败。"); } finally { setWarmingModel(false); } };
+  const redownloadEmbeddingModel = async () => { setWarmingModel(true); setNotice("已清理旧缓存，正在后台重新下载 bge-m3。"); try { setEmbeddingStatus(await fetchJson<LocalEmbeddingModelStatus>("/api/settings/prewarm", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ force: true }), label: "重新下载 bge-m3" })); } catch (error) { setNotice(error instanceof Error ? error.message : "重新下载失败。"); } finally { setWarmingModel(false); } };
   const deleteDownloadedEmbeddingModel = async () => { if (!window.confirm("删除后将清除这台设备上自动下载的 bge-m3 向量模型，之后可重新下载。确定继续吗？")) return; setDeletingModel(true); setNotice(""); try { const response = await fetch("/api/settings/prewarm", { method: "DELETE" }); const data = await readJsonResponse<LocalEmbeddingModelStatus & { error?: string }>(response, "无法删除自动下载的模型"); setEmbeddingStatus(data); setNotice("已删除自动下载的 bge-m3 向量模型。"); } catch (error) { setNotice(error instanceof Error ? error.message : "无法删除自动下载的模型。"); } finally { setDeletingModel(false); } };
-  const importEmbeddingModel = async (archive: File) => { setImportingModel(true); setNotice("正在导入 bge-m3 ZIP，完成前请勿关闭应用。"); try { const form = new FormData(); form.set("archive", archive); const response = await fetch("/api/settings/embedding-model/import", { method: "POST", body: form }); const data = await response.json() as LocalEmbeddingModelStatus & { error?: string }; if (!response.ok) throw new Error(data.error ?? "导入 bge-m3 失败。"); setEmbeddingStatus(data); setNotice("bge-m3 已导入并验证完成，现在可以完全离线进行语义比对。"); } catch (error) { setNotice(error instanceof Error ? error.message : "导入 bge-m3 失败。"); } finally { setImportingModel(false); } };
+  const importEmbeddingModel = async (archive: File) => { setImportingModel(true); setNotice("正在导入 bge-m3 ZIP，完成前请勿关闭应用。"); try { const form = new FormData(); form.set("archive", archive); setEmbeddingStatus(await fetchJson<LocalEmbeddingModelStatus>("/api/settings/embedding-model/import", { method: "POST", body: form, timeoutMs: 120_000, label: "导入 bge-m3" })); setNotice("bge-m3 已导入并验证完成，现在可以完全离线进行语义比对。"); } catch (error) { setNotice(error instanceof Error ? error.message : "导入 bge-m3 失败。"); } finally { setImportingModel(false); } };
   const chooseEmbeddingModelSource = async (next: EmbeddingModelSource) => { if (next === embeddingModelSource || savingModelSource) return; const previous = embeddingModelSource; modelSourceChangedByUser.current = true; setEmbeddingModelSource(next); setSavingModelSource(true); try { const response = await fetch("/api/settings", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ embeddingModelSource: next }) }); const data = await readJsonResponse<{ error?: string; embeddingModelSource: EmbeddingModelSource }>(response, "无法保存模型方案"); setEmbeddingModelSource(data.embeddingModelSource); if (next === "automatic") void fetch("/api/settings/prewarm", { method: "POST" }); setNotice(next === "offline" ? "已切换到离线导入模式，不会自动下载模型。" : "已切换到自动下载模式。 "); } catch (error) { setEmbeddingModelSource(previous); setNotice(error instanceof Error ? error.message : "无法保存模型方案。"); } finally { setSavingModelSource(false); } };
   const restartPlan = async () => { setRestartingPlan(true); setRestartPlanNotice(""); try { const response = await fetch("/api/planner/restart", { method: "POST" }); const data = await readJsonResponse<{ error?: string; tasks: unknown[] }>(response, "无法重启计划"); setRestartPlanNotice(`已从今天重新生成计划，共 ${data.tasks.length} 项任务。`); setRestartPlanConfirming(false); } catch (error) { setRestartPlanNotice(error instanceof Error ? error.message : "无法重启计划。"); } finally { setRestartingPlan(false); } };
 
