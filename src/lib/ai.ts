@@ -143,6 +143,7 @@ export async function generateFollowUpQuestion(card: Card, answer: string, gaps:
 
 type FollowUpCardContext = { answer?: string; gaps?: string[] };
 type GeneratedAnswerPoint = { content?: unknown; hint?: unknown; note?: unknown; role?: unknown };
+export type LearningChatMessage = { role: "user" | "assistant"; content: string; cardId: string; question: string };
 
 function relationTypeFromSource(value: unknown): CardRelationType {
   if (value === "source_parent") return "child";
@@ -201,5 +202,45 @@ export async function generateFollowUpCardDraft(card: Card, followUpQuestion: st
     return parseGeneratedFollowUpCardDraft(content, card, followUpQuestion);
   } catch (error) {
     throw new Error(error instanceof Error ? error.message : "暂时无法生成追问卡草稿。");
+  }
+}
+
+export async function generateLearningChatResponse(card: Card, history: LearningChatMessage[], message: string) {
+  const config = remoteModelConfig();
+  if (!config) throw new Error("请先在设置中配置模型服务，再使用学习助手。");
+  const recentHistory = history.slice(-16).map((item) => `${item.role === "user" ? "学习者" : "助手"}（题目：${item.question}）：${item.content}`).join("\n");
+  try {
+    return await requestModel(config, {
+      temperature: 0.35,
+      system: "你是耐心、严谨的中文技术学习助手。围绕当前卡片答疑，优先解释概念、推导和易错点；答案准确、结构清晰、适合面试复习。不要假装知道卡片以外的个人背景；信息不足时明确说明。不要给分或代替用户完成复习作答。",
+      user: `当前卡片问题：${card.question}\n当前卡片其他问法：${card.questionVariants.map((item) => item.content).join("；") || "无"}\n当前卡片答案要点：${card.answerPoints.map((item) => item.content).join("；")}\n知识库类型：${card.track}\n标签：${card.tags.join("、") || "无"}\n\n本次学习会话：\n${recentHistory || "（这是第一轮对话）"}\n\n学习者本次提问：${message.trim()}`,
+    });
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : "学习助手暂时无法回答。");
+  }
+}
+
+export function parseGeneratedLearningChatCardDraft(content: string, card: Card): FollowUpCardDraft {
+  const data = JSON.parse(content) as { question?: unknown };
+  const question = typeof data.question === "string" ? data.question.trim() : "";
+  if (question.length < 3) throw new Error("模型没有返回有效的新卡问题。");
+  return { ...parseGeneratedFollowUpCardDraft(content, card, question), relationType: "related" };
+}
+
+export async function generateLearningChatCardDraft(card: Card, messages: LearningChatMessage[]) {
+  const config = remoteModelConfig();
+  if (!config) throw new Error("请先在设置中配置模型服务，再将对话整理成卡片。");
+  const selected = messages.map((item) => `${item.role === "user" ? "学习者" : "助手"}（题目：${item.question}）：${item.content}`).join("\n");
+  if (!selected.trim()) throw new Error("请先选择至少一条对话内容。");
+  try {
+    const content = await requestModel(config, {
+      temperature: 0.25,
+      jsonMode: true,
+      system: "你是严谨的中文技术面试题编辑。根据选中的学习对话整理一张可独立学习的新卡片。只返回 JSON：{\"question\":\"...\",\"answerPoints\":[{\"content\":\"...\",\"hint\":\"...\",\"note\":\"...\",\"role\":\"key\"}],\"questionVariants\":[\"...\"],\"note\":\"...\",\"track\":\"...\",\"tags\":[\"...\"]}。必须返回至少一条核心答案要点；只保留可以从对话和当前卡片确认的事实，不确定内容要省略；新卡必须与当前卡片相关但不要重复原题。",
+      user: `当前源卡问题：${card.question}\n当前源卡答案要点：${card.answerPoints.map((item) => item.content).join("；")}\n当前源卡知识库类型：${card.track}\n当前源卡标签：${card.tags.join("、") || "无"}\n\n选中的对话内容：\n${selected}`,
+    });
+    return parseGeneratedLearningChatCardDraft(content, card);
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : "暂时无法整理为卡片草稿。");
   }
 }

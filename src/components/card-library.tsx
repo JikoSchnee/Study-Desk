@@ -16,6 +16,7 @@ import { PageHeader, PageLayout } from "@/components/page-layout";
 import { SearchableSelect } from "@/components/searchable-select";
 import { Button, Chip, EmptyState } from "@/components/ui";
 import { TourButton } from "@/components/tour";
+import { usePageState, usePageStateCache } from "@/components/page-state-cache";
 import { difficultyTier, type CardSort, type SortDirection } from "@/lib/card-filters";
 import { rarityPreset, stabilityRarityTier, type StabilityRarityPreset } from "@/lib/card-tiers";
 import { answerPointsToNumberedText, splitTags } from "@/lib/import";
@@ -28,7 +29,28 @@ type WorkspaceMode = "manual" | "import";
 type BulkEditMode = "tags" | "track";
 const defaultKnowledgeBaseTypes = ["Agent", "Java 后端", "计算机基础"];
 const cardsPageSize = 20;
+const localRequestTimeoutMs = 10_000;
 type CardPage = { cards: Card[]; learning: Record<string, CardLearningSummary>; total: number; hasMore: boolean; facets: { tracks: string[]; tags: string[] } };
+
+async function fetchJsonWithTimeout<T>(input: RequestInfo | URL, init: RequestInit = {}, label = "本地服务") {
+  const controller = new AbortController();
+  let timedOut = false;
+  const abort = () => controller.abort();
+  init.signal?.addEventListener("abort", abort, { once: true });
+  const timeout = window.setTimeout(() => { timedOut = true; controller.abort(); }, localRequestTimeoutMs);
+  try {
+    const response = await fetch(input, { ...init, signal: controller.signal });
+    const data = await response.json() as T;
+    if (!response.ok) throw new Error((data as { error?: string }).error ?? `${label}返回了 HTTP ${response.status}。`);
+    return data;
+  } catch (error) {
+    if (timedOut) throw new Error(`${label}在 10 秒内未响应，请确认桌面应用仍在运行后重试。`);
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+    init.signal?.removeEventListener("abort", abort);
+  }
+}
 
 function compactReviewTime(value: string | null | undefined, future = false) {
   if (!value) return future ? "待首次作答" : "尚未练习";
@@ -161,6 +183,8 @@ function useCardRecommendationPreload() {
 }
 
 export function CardLibrary() {
+  const pageStateCache = usePageStateCache();
+  const editCardId = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("editCardId");
   const [cards, setCards] = useState<Card[]>([]);
   const [learningByCardId, setLearningByCardId] = useState<Record<string, CardLearningSummary>>({});
   const [relationCards, setRelationCards] = useState<Card[]>([]);
@@ -168,18 +192,19 @@ export function CardLibrary() {
   const [hasMoreCards, setHasMoreCards] = useState(false);
   const [cardsLoading, setCardsLoading] = useState(true);
   const [cardsLoadingMore, setCardsLoadingMore] = useState(false);
+  const [cardsError, setCardsError] = useState("");
   const [catalogTracks, setCatalogTracks] = useState<string[]>([]);
   const [catalogTags, setCatalogTags] = useState<string[]>([]);
-  const [detail, setDetail] = useState<{ card: Card; relatedCards: Array<Card & { relationType: CardRelationType }>; learning: CardLearningDetails } | null>(null);
+  const [detail, setDetail] = usePageState<{ card: Card; relatedCards: Array<Card & { relationType: CardRelationType }>; learning: CardLearningDetails } | null>("library:detail", null);
   const [detailLoading, setDetailLoading] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
-  const [query, setQuery] = useState("");
-  const [selectedTrack, setSelectedTrack] = useState("");
-  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
-  const [sort, setSort] = useState<CardSort>("created");
-  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
-  const [editingCard, setEditingCard] = useState<Card | null>(null);
-  const [editingDraft, setEditingDraft] = useState<CardDraft | null>(null);
+  const [query, setQuery] = usePageState("library:query", "");
+  const [selectedTrack, setSelectedTrack] = usePageState("library:selected-track", "");
+  const [selectedTags, setSelectedTags] = usePageState<Set<string>>("library:selected-tags", new Set());
+  const [sort, setSort] = usePageState<CardSort>("library:sort", "created");
+  const [sortDirection, setSortDirection] = usePageState<SortDirection>("library:sort-direction", "desc");
+  const [editingCard, setEditingCard] = usePageState<Card | null>("library:editing-card", null);
+  const [editingDraft, setEditingDraft] = usePageState<CardDraft | null>("library:editing-draft", null);
   const [editBusy, setEditBusy] = useState(false);
   const [editorSaveState, setEditorSaveState] = useState<EditorSaveState>("idle");
   const [editorSaveError, setEditorSaveError] = useState("");
@@ -192,11 +217,11 @@ export function CardLibrary() {
   const [tagCatalog, setTagCatalog] = useState<TagItem[]>([]);
   const [tagDisplayLanguage, setTagDisplayLanguage] = useState<TagDisplayLanguage>("zh");
   const [stabilityRarityPreset, setStabilityRarityPreset] = useState<StabilityRarityPreset>("memory-cycle");
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [bulkEditMode, setBulkEditMode] = useState<BulkEditMode | null>(null);
-  const [showArchived, setShowArchived] = useState(false);
-  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode | null>(null);
-  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = usePageState<Set<string>>("library:selected-ids", new Set());
+  const [bulkEditMode, setBulkEditMode] = usePageState<BulkEditMode | null>("library:bulk-edit-mode", null);
+  const [showArchived, setShowArchived] = usePageState("library:show-archived", false);
+  const [workspaceMode, setWorkspaceMode] = usePageState<WorkspaceMode | null>("library:workspace-mode", null);
+  const [workspaceOpen, setWorkspaceOpen] = usePageState("library:workspace-open", false);
   const editorSaveStatusRef = useRef<HTMLDivElement>(null);
   const workspaceSwitchTimer = useRef<number | null>(null);
   const cardsRequestController = useRef<AbortController | null>(null);
@@ -224,7 +249,7 @@ export function CardLibrary() {
   }, [editingDraft?.track]);
 
   const loadCardsPage = useCallback(async (offset: number, replace = false) => {
-    if (replace) { cardsRequestGeneration.current += 1; cardsRequestController.current?.abort(); setCardsLoading(true); setReturnScrollPosition(null); }
+    if (replace) { cardsRequestGeneration.current += 1; cardsRequestController.current?.abort(); setCardsLoading(true); setCardsError(""); setReturnScrollPosition(null); }
     else setCardsLoadingMore(true);
     const generation = cardsRequestGeneration.current;
     const controller = new AbortController();
@@ -232,9 +257,7 @@ export function CardLibrary() {
     const params = new URLSearchParams({ offset: String(offset), limit: String(cardsPageSize), query, track: selectedTrack, sort, direction: sortDirection, archived: String(showArchived) });
     for (const tag of selectedTags) params.append("tag", tag);
     try {
-      const response = await fetch(`/api/cards?${params}`, { signal: controller.signal });
-      const data = await response.json() as CardPage;
-      if (!response.ok) throw new Error("无法读取卡片。");
+      const data = await fetchJsonWithTimeout<CardPage>(`/api/cards?${params}`, { signal: controller.signal }, "卡片库");
       if (generation !== cardsRequestGeneration.current) return;
       setCards((current) => replace ? data.cards : [...current, ...data.cards.filter((card) => !current.some((existing) => existing.id === card.id))]);
       setLearningByCardId((current) => replace ? data.learning : { ...current, ...data.learning });
@@ -243,16 +266,28 @@ export function CardLibrary() {
       setCatalogTracks(data.facets.tracks);
       setCatalogTags(data.facets.tags);
     } catch (error) {
-      if (!(error instanceof DOMException && error.name === "AbortError")) setNotice(error instanceof Error ? error.message : "无法读取卡片。");
+      if (!(error instanceof DOMException && error.name === "AbortError")) {
+        const message = error instanceof Error ? error.message : "无法读取卡片。";
+        if (replace) setCardsError(message);
+        setNotice(message);
+      }
     } finally {
       if (generation === cardsRequestGeneration.current) { setCardsLoading(false); setCardsLoadingMore(false); }
     }
   }, [query, selectedTrack, selectedTags, showArchived, sort, sortDirection]);
   const load = useCallback(async () => {
-    const [settings, tagData] = await Promise.all([fetch("/api/settings").then((response) => response.json()), fetch("/api/tags").then((response) => response.json())]);
-    setStabilityRarityPreset(rarityPreset(settings.stabilityRarityPreset));
-    setTagDisplayLanguage(settings.tagDisplayLanguage === "en" || settings.tagDisplayLanguage === "both" ? settings.tagDisplayLanguage : "zh");
-    setTagCatalog(tagData.tags ?? []);
+    const [settingsResult, tagsResult] = await Promise.allSettled([
+      fetchJsonWithTimeout<{ stabilityRarityPreset?: string; tagDisplayLanguage?: string }>("/api/settings", {}, "设置服务"),
+      fetchJsonWithTimeout<{ tags?: TagItem[] }>("/api/tags", {}, "标签服务"),
+    ]);
+    if (settingsResult.status === "fulfilled") {
+      const settings = settingsResult.value;
+      setStabilityRarityPreset(rarityPreset(settings.stabilityRarityPreset));
+      setTagDisplayLanguage(settings.tagDisplayLanguage === "en" || settings.tagDisplayLanguage === "both" ? settings.tagDisplayLanguage : "zh");
+    }
+    if (tagsResult.status === "fulfilled") setTagCatalog(tagsResult.value.tags ?? []);
+    const auxiliaryFailure = [settingsResult, tagsResult].find((result) => result.status === "rejected");
+    if (auxiliaryFailure?.status === "rejected") setNotice(auxiliaryFailure.reason instanceof Error ? auxiliaryFailure.reason.message : "部分卡片库信息暂时无法读取。");
     await loadCardsPage(0, true);
   }, [loadCardsPage]);
   useEffect(() => { void load(); }, [load]);
@@ -261,7 +296,7 @@ export function CardLibrary() {
     if (workspaceSwitchTimer.current !== null) window.clearTimeout(workspaceSwitchTimer.current);
   }, []);
   useEffect(() => {
-    if (window.localStorage.getItem("mock-interview:supplement-draft") || window.localStorage.getItem("mock-interview:follow-up-card-draft")) {
+    if (window.localStorage.getItem("mock-interview:supplement-draft") || window.localStorage.getItem("mock-interview:follow-up-card-draft") || window.localStorage.getItem("mock-interview:learning-chat-card-draft")) {
       setWorkspaceMode("manual");
       setWorkspaceOpen(true);
     }
@@ -401,6 +436,15 @@ export function CardLibrary() {
       return response.json() as Promise<{ cards: Card[] }>;
     }).then((data) => setRelationCards(data.cards)).catch(() => setRelationCards(cards));
   };
+  useEffect(() => {
+    if (!editCardId || editingCard?.id === editCardId) return;
+    const loaded = cards.find((card) => card.id === editCardId);
+    if (loaded) { openCardEditor(loaded); return; }
+    void fetch(`/api/cards/${editCardId}/details`).then(async (response) => {
+      if (!response.ok) throw new Error("无法读取卡片。");
+      return response.json() as Promise<{ card: Card }>;
+    }).then((data) => openCardEditor(data.card)).catch(() => setNotice("无法打开这张卡片的编辑窗口。"));
+  }, [cards, editCardId, editingCard?.id]);
   const generateVariants = async (question: string, answerPoints: AnswerPoint[], existing: QuestionVariant[]) => {
     if (question.trim().length < 3 || !answerPoints.some((item) => item.content.trim())) { setNotice("请先填写主问题和至少一条答案要点，再让 AI 补充问法。"); return; }
     setAiBusy(true); setNotice("");
@@ -425,6 +469,8 @@ export function CardLibrary() {
       // instead of making its visibility depend on a second, unrelated GET request.
       recommendationPreload.clear();
       setCards((current) => current.map((card) => card.id === data.card.id ? data.card : card));
+      const reviewCard = pageStateCache.get("review:card") as Card | null | undefined;
+      if (reviewCard?.id === data.card.id) pageStateCache.set("review:card", data.card);
       await load();
       saved = true;
       setEditorSaveState("success");
@@ -507,7 +553,7 @@ export function CardLibrary() {
           <button type="button" className="clear-card-filters" onClick={clearFilters}>清除筛选</button>
         </div>
       </div><div data-tour="library-selection">{selectedIds.size > 0 && <div className="bulk-card-toolbar" role="status"><strong>已选择 {selectedIds.size} 张</strong>{showArchived ? <Button variant="secondary" onClick={() => void bulk("restore")}><Undo2 size={16}/> 恢复</Button> : <Button variant="secondary" onClick={() => void bulk("archive")}><Archive size={16}/> 归档</Button>}<Button variant="ghost" onClick={() => setBulkEditMode("tags")}><Tag size={16}/> 添加标签</Button><Button variant="ghost" onClick={() => setBulkEditMode("track")}>移动类型</Button><Button variant="ghost" onClick={() => exportSelected("csv")}><Download size={16}/> CSV</Button><Button variant="ghost" onClick={() => exportSelected("json")}><Download size={16}/> JSON</Button><Button variant="danger" onClick={() => void bulk("delete")}><Trash2 size={16}/> 永久删除</Button><button type="button" className="clear-card-filters" onClick={() => setSelectedIds(new Set())}>取消选择</button></div>}</div></>
-      {cardsLoading ? <div className="cards-loading" role="status">正在加载卡片…</div> : cardsTotal ? cards.length ? <><div className="card-grid">{cards.map((card) => {
+      {cardsLoading ? <div className="cards-loading" role="status">正在加载卡片…</div> : cardsError ? <EmptyState title="暂时无法加载卡片" detail={cardsError} action={<Button type="button" onClick={() => void load()}>重新加载</Button>} /> : cardsTotal ? cards.length ? <><div className="card-grid">{cards.map((card) => {
         const learning = learningByCardId[card.id];
         const difficulty = difficultyTier(learning?.fsrsDifficulty);
         const rarity = stabilityRarityTier(learning?.fsrsStability, stabilityRarityPreset);

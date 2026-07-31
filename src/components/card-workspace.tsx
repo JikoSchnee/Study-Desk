@@ -1,6 +1,7 @@
 "use client";
 
 import { ChangeEvent, DragEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePageState } from "@/components/page-state-cache";
 import { CheckCircle2, ChevronLeft, CircleAlert, FileSpreadsheet, Link2, Plus, UploadCloud, X } from "lucide-react";
 import { AnswerStructureEditor as AnswerPointsEditor, QuestionWordingsEditor, RelatedCardsEditor, TagRecommendations, useCardRecommendations } from "@/components/card-form-editors";
 import { LLMConfigurationDialog } from "@/components/llm-configuration-dialog";
@@ -36,17 +37,18 @@ type CardWorkspaceProps = {
 };
 
 export function CardWorkspace({ initialMode, onClose, onComplete }: CardWorkspaceProps) {
-  const [cards, setCards] = useState<Card[]>([]);
-  const [mode, setMode] = useState<"manual" | "import">(initialMode);
-  const [draft, setDraft] = useState<CardDraft>(freshDraft);
-  const [notice, setNotice] = useState("");
-  const [saveFeedback, setSaveFeedback] = useState<SaveFeedback | null>(null);
-  const [file, setFile] = useState<File | null>(null);
-  const [sheets, setSheets] = useState<SheetInfo[]>([]);
-  const [sheetName, setSheetName] = useState("");
-  const [mapping, setMapping] = useState<ImportColumnMapping>(emptyMapping);
-  const [previewRows, setPreviewRows] = useState<ImportPreviewRow[]>([]);
-  const [included, setIncluded] = useState<Set<string>>(new Set());
+  const cacheKey = `workspace:${initialMode}`;
+  const [cards, setCards] = usePageState<Card[]>(`${cacheKey}:cards`, []);
+  const [mode, setMode] = usePageState<"manual" | "import">(`${cacheKey}:mode`, initialMode);
+  const [draft, setDraft] = usePageState<CardDraft>(`${cacheKey}:draft`, freshDraft());
+  const [notice, setNotice] = usePageState(`${cacheKey}:notice`, "");
+  const [saveFeedback, setSaveFeedback] = usePageState<SaveFeedback | null>(`${cacheKey}:save-feedback`, null);
+  const [file, setFile] = usePageState<File | null>(`${cacheKey}:file`, null);
+  const [sheets, setSheets] = usePageState<SheetInfo[]>(`${cacheKey}:sheets`, []);
+  const [sheetName, setSheetName] = usePageState(`${cacheKey}:sheet-name`, "");
+  const [mapping, setMapping] = usePageState<ImportColumnMapping>(`${cacheKey}:mapping`, emptyMapping);
+  const [previewRows, setPreviewRows] = usePageState<ImportPreviewRow[]>(`${cacheKey}:preview-rows`, []);
+  const [included, setIncluded] = usePageState<Set<string>>(`${cacheKey}:included`, new Set());
   const [importBusy, setImportBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -106,7 +108,9 @@ export function CardWorkspace({ initialMode, onClose, onComplete }: CardWorkspac
     window.localStorage.removeItem("mock-interview:supplement-draft");
   }, []);
   useEffect(() => {
-    const raw = window.localStorage.getItem("mock-interview:follow-up-card-draft");
+    const learningChatDraftKey = "mock-interview:learning-chat-card-draft";
+    const draftKey = window.localStorage.getItem(learningChatDraftKey) ? learningChatDraftKey : "mock-interview:follow-up-card-draft";
+    const raw = window.localStorage.getItem(draftKey);
     if (!raw) return;
     try {
       const saved = JSON.parse(raw) as Partial<FollowUpCardDraft>;
@@ -125,9 +129,9 @@ export function CardWorkspace({ initialMode, onClose, onComplete }: CardWorkspac
       });
       setAiCandidates([]);
       setSaveFeedback(null);
-      setNotice("AI 已生成追问卡草稿，并预选了与原卡的关联关系；请核对后保存。");
+      setNotice(draftKey === learningChatDraftKey ? "AI 已根据选中的学习对话生成关联卡草稿；请核对后保存。" : "AI 已生成追问卡草稿，并预选了与原卡的关联关系；请核对后保存。");
     } catch { setNotice("追问卡草稿无效，已保留空白录入表单。请重新生成。 "); }
-    window.localStorage.removeItem("mock-interview:follow-up-card-draft");
+    window.localStorage.removeItem(draftKey);
   }, []);
   const resetImport = () => { setFile(null); setSheets([]); setSheetName(""); setMapping(emptyMapping); setPreviewRows([]); setIncluded(new Set()); setDragging(false); };
   const inspectFile = async (selected: File) => { setImportBusy(true); setNotice(""); const form = new FormData(); form.set("file", selected); form.set("phase", "inspect"); const response = await fetch("/api/cards/import/parse", { method: "POST", body: form }); const data = await response.json(); setImportBusy(false); if (!response.ok) { setNotice(data.error ?? "无法读取文件。"); return; } const first = data.sheets[0] as SheetInfo | undefined; setFile(selected); setSheets(data.sheets); setSheetName(first?.name ?? ""); setMapping(first?.mapping ?? emptyMapping); setPreviewRows([]); };

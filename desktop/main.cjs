@@ -10,6 +10,7 @@ let serverProcess;
 let serverPort;
 let isQuitting = false;
 let isRestartingServer = false;
+const releasesUrl = "https://github.com/JikoSchnee/Study-Desk/releases";
 
 function userHome() { return path.join(app.getPath("userData"), "runtime"); }
 function sendMaximizeState() { mainWindow?.webContents.send("window:maximize-change", mainWindow?.isMaximized() ?? false); }
@@ -34,8 +35,8 @@ function fetchLatestRelease() {
         try { resolve(JSON.parse(body)); } catch { reject(new Error("无法读取 GitHub 的版本信息。")); }
       });
     });
-    request.setTimeout(10_000, () => request.destroy(new Error("检查更新超时。")));
-    request.on("error", reject);
+    request.setTimeout(10_000, () => request.destroy(new Error("无法连接 GitHub（10 秒超时）。请检查网络后重试，或直接前往 Releases 下载。")));
+    request.on("error", (error) => reject(new Error(`无法连接 GitHub：${error.message}。请检查网络后重试，或直接前往 Releases 下载。`)));
   });
 }
 
@@ -159,11 +160,11 @@ ipcMain.handle("updates:check", async () => {
       state: compareVersions(latestVersion, currentVersion) > 0 ? "available" : "current",
       currentVersion,
       latestVersion,
-      url: typeof release.html_url === "string" ? release.html_url : "https://github.com/JikoSchnee/Study-Desk/releases",
+      url: typeof release.html_url === "string" ? release.html_url : releasesUrl,
       releaseNotes: typeof release.body === "string" && release.body.trim() ? release.body.trim() : "此版本暂未提供更新说明。",
     };
   } catch (error) {
-    return { state: "error", currentVersion, message: error instanceof Error ? error.message : "检查更新失败。" };
+    return { state: "error", currentVersion, message: error instanceof Error ? error.message : "检查更新失败，请直接前往 Releases 下载。", url: releasesUrl };
   }
 });
 const gotSingleInstanceLock = app.requestSingleInstanceLock();

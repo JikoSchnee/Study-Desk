@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { generateQuestionVariants, hasRemoteModelConfig, parseGeneratedFollowUpCardDraft, parseGeneratedQuestionVariants } from "./ai";
+import { generateQuestionVariants, hasRemoteModelConfig, parseGeneratedFollowUpCardDraft, parseGeneratedLearningChatCardDraft, parseGeneratedQuestionVariants } from "./ai";
 import type { Card } from "./types";
 
 afterEach(() => {
@@ -89,5 +89,13 @@ describe("AI follow-up card drafts", () => {
     const draft = parseGeneratedFollowUpCardDraft(JSON.stringify({ answerPoints: ["补充答案要点"], relationToSource: "unknown" }), card, "追问的主问题");
     expect(draft.relationType).toBe("related");
     expect(() => parseGeneratedFollowUpCardDraft(JSON.stringify({ answerPoints: [] }), card, "追问的主问题")).toThrow("核心答案要点");
+  });
+
+  it("turns selected learning dialogue into a related card draft", () => {
+    const draft = parseGeneratedLearningChatCardDraft(JSON.stringify({ question: "RAG 的重排序在什么时候使用？", answerPoints: [{ content: "在初步召回后对候选文档做更精细的相关性排序。", hint: "召回之后" }], tags: ["RAG", "重排序"] }), card);
+
+    expect(draft.question).toBe("RAG 的重排序在什么时候使用？");
+    expect(draft.relationType).toBe("related");
+    expect(draft.answerPoints[0].hint).toBe("召回之后");
   });
 });

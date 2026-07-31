@@ -16,4 +16,13 @@ contextBridge.exposeInMainWorld("mockInterviewDesktop", {
   updates: {
     check: () => ipcRenderer.invoke("updates:check"),
   },
+  server: {
+    onStatus: (listener) => {
+      const failed = (_event, message) => listener({ state: "error", message });
+      const recovered = () => listener({ state: "ready" });
+      ipcRenderer.on("desktop:server-error", failed);
+      ipcRenderer.on("desktop:server-recovered", recovered);
+      return () => { ipcRenderer.removeListener("desktop:server-error", failed); ipcRenderer.removeListener("desktop:server-recovered", recovered); };
+    },
+  },
 });

@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowRight, BookOpenCheck, BrainCircuit, CheckCircle2, ChevronLeft, ChevronRight, Dices, Eye, GraduationCap, Lightbulb, RefreshCw, Sparkles, Target } from "lucide-react";
+import { ArrowRight, BookOpenCheck, BrainCircuit, CheckCircle2, ChevronLeft, ChevronRight, Dices, Eye, GraduationCap, Lightbulb, MessageSquareText, PencilLine, RefreshCw, Sparkles, Target } from "lucide-react";
 import { Button, Chip, EmptyState } from "@/components/ui";
 import { PageHeader, PageLayout } from "@/components/page-layout";
 import { SpeechRecorder } from "@/components/speech-recorder";
@@ -13,6 +13,8 @@ import { SemanticComparisonProgress } from "@/components/semantic-comparison-pro
 import { useSemanticComparisonProgress } from "@/components/use-semantic-comparison-progress";
 import { difficultyTier } from "@/lib/card-filters";
 import { answerPointLabels } from "@/lib/import";
+import { usePageState } from "@/components/page-state-cache";
+import { ReviewLearningChat } from "@/components/review-learning-chat";
 import type { AnswerComparisonMode, Card, CardLearningSummary, Evaluation, RatingName } from "@/lib/types";
 
 type QueueKind = "initial" | "review" | "weak";
@@ -20,7 +22,7 @@ type SessionKind = QueueKind | "random";
 type QueueProgress = Record<QueueKind, { pending: number; completedToday: number }>;
 
 const queueCopy: Record<QueueKind, { label: string; title: string; description: string; icon: typeof GraduationCap }> = {
-  initial: { label: "首次学习", title: "先看懂，再复述。", description: "逐条看完答案要点，口头复述后，明天再进行第一次主动回忆。", icon: GraduationCap },
+  initial: { label: "首次学习", title: "先看懂，再进入回忆。", description: "逐条看完答案要点后，明天再进行第一次主动回忆。", icon: GraduationCap },
   review: { label: "到期复习", title: "把记忆再叫回来。", description: "按 FSRS 到期时间复习，稳住已经学过的内容。", icon: RefreshCw },
   weak: { label: "薄弱复习", title: "把难点再练一遍。", description: "这里的练习不改变 FSRS 排程，只帮你集中补弱。", icon: Target },
 };
@@ -33,34 +35,36 @@ function progressText(stats: { pending: number; completedToday: number }) {
 
 export default function ReviewPage() {
   const router = useRouter();
-  const [taskTarget] = useState(() => {
+  const [taskTarget] = usePageState("review:target", (() => {
     if (typeof window === "undefined") return { queue: null as string | null, cardId: null as string | null };
     const params = new URLSearchParams(window.location.search);
     return { queue: params.get("queue"), cardId: params.get("cardId") };
-  });
-  const [session, setSession] = useState<SessionKind | null>(null);
-  const [card, setCard] = useState<Card | null | undefined>(null);
-  const [learning, setLearning] = useState<CardLearningSummary | null>(null);
-  const [progress, setProgress] = useState<QueueProgress | null>(null);
-  const [presentedQuestion, setPresentedQuestion] = useState("");
-  const [answer, setAnswer] = useState("");
-  const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [activeHint, setActiveHint] = useState<number | null>(null);
-  const [seenRandomIds, setSeenRandomIds] = useState<string[]>([]);
-  const [comparisonMode, setComparisonMode] = useState<AnswerComparisonMode>("embedding");
-  const [llmConfigured, setLlmConfigured] = useState(false);
-  const [feedbackNotice, setFeedbackNotice] = useState("");
-  const [followUpQuestion, setFollowUpQuestion] = useState("");
-  const [followUpAnswer, setFollowUpAnswer] = useState("");
-  const [followUpFeedback, setFollowUpFeedback] = useState<Evaluation | null>(null);
-  const [followUpBusy, setFollowUpBusy] = useState(false);
-  const [followUpDraftBusy, setFollowUpDraftBusy] = useState(false);
-  const [submitError, setSubmitError] = useState("");
-  const [revealedStudyPoints, setRevealedStudyPoints] = useState<number[]>([]);
-  const [spokenBack, setSpokenBack] = useState(false);
-  const [studyBusy, setStudyBusy] = useState(false);
-  const [studyError, setStudyError] = useState("");
+  })());
+  const [session, setSession] = usePageState<SessionKind | null>("review:session", null);
+  const [card, setCard] = usePageState<Card | null | undefined>("review:card", null);
+  const [learning, setLearning] = usePageState<CardLearningSummary | null>("review:learning", null);
+  const [progress, setProgress] = usePageState<QueueProgress | null>("review:progress", null);
+  const [presentedQuestion, setPresentedQuestion] = usePageState("review:presented-question", "");
+  const [answer, setAnswer] = usePageState("review:answer", "");
+  const [evaluation, setEvaluation] = usePageState<Evaluation | null>("review:evaluation", null);
+  const [busy, setBusy] = usePageState("review:busy", false);
+  const [activeHint, setActiveHint] = usePageState<number | null>("review:active-hint", null);
+  const [seenRandomIds, setSeenRandomIds] = usePageState<string[]>("review:seen-random", []);
+  const [comparisonMode, setComparisonMode] = usePageState<AnswerComparisonMode>("review:comparison-mode", "embedding");
+  const [llmConfigured, setLlmConfigured] = usePageState("review:llm-configured", false);
+  const [feedbackNotice, setFeedbackNotice] = usePageState("review:feedback-notice", "");
+  const [followUpQuestion, setFollowUpQuestion] = usePageState("review:follow-up-question", "");
+  const [followUpAnswer, setFollowUpAnswer] = usePageState("review:follow-up-answer", "");
+  const [followUpFeedback, setFollowUpFeedback] = usePageState<Evaluation | null>("review:follow-up-feedback", null);
+  const [followUpBusy, setFollowUpBusy] = usePageState("review:follow-up-busy", false);
+  const [followUpDraftBusy, setFollowUpDraftBusy] = usePageState("review:follow-up-draft-busy", false);
+  const [submitError, setSubmitError] = usePageState("review:submit-error", "");
+  const [revealedStudyPoints, setRevealedStudyPoints] = usePageState<number[]>("review:revealed-points", []);
+  const [studyBusy, setStudyBusy] = usePageState("review:study-busy", false);
+  const [studyError, setStudyError] = usePageState("review:study-error", "");
+  const [studyEditMode, setStudyEditMode] = usePageState<Record<string, "note" | "hint">>("review:point-edit-mode", {});
+  const [studyEditErrors, setStudyEditErrors] = usePageState<Record<string, string>>("review:point-edit-errors", {});
+  const studySaveTimers = useRef<Record<string, number>>({});
   const semanticProgress = useSemanticComparisonProgress();
 
   const loadQueueProgress = useCallback(async () => {
@@ -93,7 +97,6 @@ export default function ReviewPage() {
     setActiveHint(null);
     setPresentedQuestion("");
     setRevealedStudyPoints([]);
-    setSpokenBack(false);
     setStudyBusy(false);
     setStudyError("");
     const query = nextSession === "random"
@@ -116,8 +119,9 @@ export default function ReviewPage() {
 
   useEffect(() => {
     const { queue, cardId } = taskTarget;
-    if (queue === "initial" || queue === "review" || queue === "weak") void loadSession(queue, [], cardId);
-  }, [loadSession, taskTarget]);
+    if (session === null && (queue === "initial" || queue === "review" || queue === "weak")) void loadSession(queue, [], cardId);
+  }, [loadSession, session, taskTarget]);
+  useEffect(() => () => Object.values(studySaveTimers.current).forEach((timer) => window.clearTimeout(timer)), []);
 
   useEffect(() => {
     if (!card || !session || evaluation) return;
@@ -199,7 +203,7 @@ export default function ReviewPage() {
 
   const completeStudy = useCallback(async (): Promise<string | void> => {
     if (!card || session !== "initial") return "当前卡片无法完成首次学习。";
-    if (revealedStudyPoints.length < card.answerPoints.length || !spokenBack) return "请先看完全部要点，并完成口头复述。";
+    if (revealedStudyPoints.length < card.answerPoints.length) return "请先看完全部要点。";
     setStudyBusy(true); setStudyError("");
     try {
       const response = await fetch("/api/review/study", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cardId: card.id }) });
@@ -211,7 +215,7 @@ export default function ReviewPage() {
       setStudyError(message);
       return message;
     } finally { setStudyBusy(false); }
-  }, [card, loadSession, revealedStudyPoints.length, session, spokenBack]);
+  }, [card, loadSession, revealedStudyPoints.length, session]);
 
   const evaluate = useCallback(async (): Promise<string | void> => {
     if (!card || !answer.trim()) return "请先写一段自己的回答，下一步会用同一个提交操作生成报告。";
@@ -291,11 +295,28 @@ export default function ReviewPage() {
   const allStudyPointsRevealed = revealedStudyPoints.length === activeCard.answerPoints.length;
   const studyPointLabels = answerPointLabels(activeCard.answerPoints);
   const revealStudyPoint = (index: number) => setRevealedStudyPoints((current) => current.includes(index) ? current : [...current, index]);
+  const updateStudyPoint = (pointId: string, field: "note" | "hint", value: string) => {
+    if (!card) return;
+    const updated = { ...card, answerPoints: card.answerPoints.map((point) => point.id === pointId ? { ...point, [field]: value } : point) };
+    setCard(updated);
+    setStudyEditErrors((errors) => ({ ...errors, [pointId]: "" }));
+    window.clearTimeout(studySaveTimers.current[pointId]);
+    studySaveTimers.current[pointId] = window.setTimeout(() => {
+      void fetch("/api/cards", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: updated.id, question: updated.question, questionVariants: updated.questionVariants, relations: updated.relations, answerPoints: updated.answerPoints, note: updated.note, track: updated.track, tags: updated.tags, difficulty: updated.difficulty, source: updated.source ?? "" }) })
+        .then(async (response) => {
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error ?? "无法保存修改。");
+          setCard(data.card);
+        })
+        .catch((error) => setStudyEditErrors((errors) => ({ ...errors, [pointId]: error instanceof Error ? error.message : "保存失败，请重试。" })));
+    }, 450);
+  };
 
   return <PageLayout>
     <SemanticComparisonProgress open={semanticProgress.open} progress={semanticProgress.progress}/>
-    <PageHeader eyebrow={<><BrainCircuit size={15}/> {isRandom ? "随机练习" : sessionCopy?.label}</>} title={isRandom ? "随机抽一题，说说看。" : isInitial ? "先看懂，再说出来。" : queue === "weak" ? "把难点练扎实。" : "把记忆再叫回来。"} description={isRandom ? "这次练习只提供反馈，不会影响复习排程。" : isInitial ? "这不是考试：逐条看完答案要点，口头复述后，明天再进行第一次主动回忆。" : queue === "weak" ? "薄弱复习不改变排程，练好后可以把它移出队列。" : "说不完整没关系，关键是把思路调出来。"} tour="review" actions={<>{isRandom ? <Chip tone="blue">随机练习</Chip> : stats && <Chip tone={isInitial ? "green" : "blue"}>{progressText(stats)}</Chip>}<Button variant="secondary" onClick={isRandom ? loadRandom : leaveSession}>{isRandom ? <><Dices size={17}/> 再抽一题</> : "切换练习"}</Button></>} />
-    <article className="review-card page-focus-content">
+    <PageHeader eyebrow={<><BrainCircuit size={15}/> {isRandom ? "随机练习" : sessionCopy?.label}</>} title={isRandom ? "随机抽一题，说说看。" : isInitial ? "先看懂，再进入回忆。" : queue === "weak" ? "把难点练扎实。" : "把记忆再叫回来。"} description={isRandom ? "这次练习只提供反馈，不会影响复习排程。" : isInitial ? "这不是考试：逐条看完答案要点后，明天再进行第一次主动回忆。" : queue === "weak" ? "薄弱复习不改变排程，练好后可以把它移出队列。" : "说不完整没关系，关键是把思路调出来。"} tour="review" actions={<>{isRandom ? <Chip tone="blue">随机练习</Chip> : stats && <Chip tone={isInitial ? "green" : "blue"}>{progressText(stats)}</Chip>}<Button variant="secondary" onClick={isRandom ? loadRandom : leaveSession}>{isRandom ? <><Dices size={17}/> 再抽一题</> : "切换练习"}</Button></>} />
+    <div className="review-learning-layout page-focus-content">
+    <article className="review-card">
       <div><div className="review-question-heading"><p className="eyebrow">问题</p>{isInitial ? <Chip tone="green">首次学习</Chip> : difficulty && <span className={`difficulty-badge difficulty-${difficulty.className}`} title={`FSRS 难度 ${learning?.fsrsDifficulty?.toFixed(1)} / 10`}>难度 {difficulty.label}<small>{learning?.fsrsDifficulty?.toFixed(1)}</small></span>}</div><h2 className="review-question">{presentedQuestion}</h2></div>
       {isInitial ? <section className="initial-study-flow" data-tour="initial-study-flow" aria-label="首次学习步骤">
         <div className="initial-study-intro"><div className="initial-study-orb"><GraduationCap size={24}/></div><div><p className="eyebrow">先理解，再回忆</p><h3>沿着提示，逐条看懂答案。</h3><p>每个要点先给出一个线索；点击后查看完整解释。不会评分，也不会记录为作答。</p></div></div>
@@ -303,17 +324,20 @@ export default function ReviewPage() {
           {activeCard.answerPoints.map((point, index) => {
             const revealed = revealedStudyPoints.includes(index);
             const pointLabel = point.role === "key" || !point.role ? studyPointLabels.get(point.id) ?? String(index + 1) : point.role === "opening" ? "开场" : "收束";
-            return <li className={`${revealed ? "revealed" : ""}${point.parentId ? " initial-study-subpoint" : ""}`} key={point.id}><div className="initial-study-point-number">{revealed ? <CheckCircle2 size={17}/> : pointLabel}</div><div><p className="eyebrow">要点 {pointLabel}</p>{revealed ? <p className="initial-study-answer">{point.content}</p> : <><p className="initial-study-hint"><Lightbulb size={16}/>{point.hint.trim() || "先用自己的话想一想这个关键点。"}</p><Button type="button" variant="secondary" onClick={() => revealStudyPoint(index)}><Eye size={16}/> 查看完整要点</Button></>}</div></li>;
+            const editMode = studyEditMode[point.id];
+            const toggleStudyEditor = (nextMode: "note" | "hint") => setStudyEditMode((current) => { const next = { ...current }; if (next[point.id] === nextMode) delete next[point.id]; else next[point.id] = nextMode; return next; });
+            return <li className={`${revealed ? "revealed" : ""}${point.parentId ? " initial-study-subpoint" : ""}`} key={point.id}><div className="initial-study-point-number">{revealed ? <CheckCircle2 size={17}/> : pointLabel}</div><div><p className="eyebrow">要点 {pointLabel}</p>{revealed ? <><p className="initial-study-answer">{point.content}</p>{!point.parentId && <div className="initial-study-point-actions"><button type="button" onClick={() => toggleStudyEditor("note")}><MessageSquareText size={15}/> 批注</button><button type="button" onClick={() => toggleStudyEditor("hint")}><Lightbulb size={15}/> 编辑提示</button><button type="button" onClick={() => router.push(`/library?editCardId=${activeCard.id}`)}><PencilLine size={15}/> 编辑全部</button></div>}{!point.parentId && editMode && <label className="initial-study-inline-editor">{editMode === "note" ? "要点批注" : "回忆提示"}<textarea rows={2} value={point[editMode]} onChange={(event) => updateStudyPoint(point.id, editMode, event.target.value)} placeholder={editMode === "note" ? "记录补充、案例或待核实内容" : "用一句线索帮助下次回忆"} />{studyEditErrors[point.id] && <span className="danger">{studyEditErrors[point.id]}</span>}</label>}</> : <><p className="initial-study-hint"><Lightbulb size={16}/>{point.hint.trim() || "先用自己的话想一想这个关键点。"}</p><Button type="button" variant="secondary" onClick={() => revealStudyPoint(index)}><Eye size={16}/> 查看完整要点</Button></>}</div></li>;
           })}
         </ol>
-        {allStudyPointsRevealed && <div className="initial-study-recall"><div><p className="eyebrow">合上答案，试着说一遍</p><h3>用自己的话复述核心逻辑。</h3><p>不用输入或评分；只要能把关键点串起来，就可以继续。</p></div><label><input type="checkbox" checked={spokenBack} onChange={(event) => setSpokenBack(event.target.checked)}/> 我已完成口头复述</label></div>}
-        <div className="form-actions initial-study-actions"><small>{allStudyPointsRevealed ? "完成后，第一次正式主动回忆会安排在明天上午。" : `还需查看 ${activeCard.answerPoints.length - revealedStudyPoints.length} 个要点`}</small><Button disabled={!allStudyPointsRevealed || !spokenBack || studyBusy} onClick={() => void completeStudy()}>{studyBusy ? "正在安排复习…" : <><CheckCircle2 size={17}/> 完成首次学习</>}</Button>{studyError && <span className="danger" role="alert">{studyError}</span>}</div>
+        <div className="form-actions initial-study-actions"><small>{allStudyPointsRevealed ? "全部要点已看完；完成后，第一次正式主动回忆会安排在明天上午。" : `还需查看 ${activeCard.answerPoints.length - revealedStudyPoints.length} 个要点`}</small><Button disabled={!allStudyPointsRevealed || studyBusy} onClick={() => void completeStudy()}>{studyBusy ? "正在安排复习…" : <><CheckCircle2 size={17}/> 完成首次学习</>}</Button>{studyError && <span className="danger" role="alert">{studyError}</span>}</div>
       </section> : !evaluation ? <div className="form-grid" data-tour="review-answer">
         {activeHint !== null && <section className="review-hints" aria-live="polite" aria-label="回忆提示" tabIndex={0} onKeyDown={handleHintKeys}><div className="review-hint"><Lightbulb size={17}/><div className="review-hint-content"><div className="hint-title"><strong>提示 {activeHint + 1}/{hints.length}</strong><span>可用左右方向键切换</span></div><p>{hints[activeHint]}</p><div className="hint-navigation"><button type="button" aria-label="上一条提示" disabled={activeHint === 0} onClick={() => switchHint(-1)}><ChevronLeft size={17}/> 上一条</button><span>{activeHint + 1} / {hints.length}</span><button type="button" aria-label="下一条提示" disabled={activeHint === hints.length - 1} onClick={() => switchHint(1)}>下一条 <ChevronRight size={17}/></button></div></div></div></section>}
         <textarea className="answer" value={answer} onChange={(event) => setAnswer(event.target.value)} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); void evaluate(); } }} placeholder="建议按要点分行作答（如 1. … 换行 2. …），识别和高亮效果最佳。" />
         <ComparisonModeControl mode={comparisonMode} onChange={setComparisonMode} llmConfigured={llmConfigured} compact />
-        <div className="form-actions">{hints.length ? <Button type="button" variant="ghost" className="hint-button" onClick={() => setActiveHint((current) => current === null ? 0 : null)}><Lightbulb size={17}/>{activeHint === null ? "需要提示" : "收起提示"}</Button> : <p className="hint-unavailable"><Lightbulb size={16}/> 此卡暂未设置提示</p>}<SpeechRecorder onTranscript={(value) => setAnswer((old) => `${old}${old ? "\n" : ""}${value}`)} /><Button disabled={!answer.trim() || busy} onClick={evaluate}>{busy ? "正在准备比对…" : "提交回答"}</Button><small className="shortcut-hint">⌘/Ctrl + Enter 提交 · H 提示</small>{submitError && <span className="danger" role="alert">{submitError} <button type="button" onClick={() => void evaluate()}>重试</button></span>}</div>
+        <div className="form-actions review-answer-actions"><small className="shortcut-hint">⌘/Ctrl + Enter 提交 · H 提示</small><div className="review-answer-buttons">{hints.length ? <Button type="button" variant="ghost" className="hint-button" onClick={() => setActiveHint((current) => current === null ? 0 : null)}><Lightbulb size={17}/>{activeHint === null ? "需要提示" : "收起提示"}</Button> : <p className="hint-unavailable"><Lightbulb size={16}/> 此卡暂未设置提示</p>}<SpeechRecorder onTranscript={(value) => setAnswer((old) => `${old}${old ? "\n" : ""}${value}`)} /><Button disabled={!answer.trim() || busy} onClick={evaluate}>{busy ? "正在准备比对…" : "提交回答"}</Button></div>{submitError && <span className="danger" role="alert">{submitError} <button type="button" onClick={() => void evaluate()}>重试</button></span>}</div>
       </div> : isRandom ? <div className="random-feedback"><div className="feedback"><strong>{evaluation.score} 分 · 随机练习反馈</strong><p>{evaluation.feedback}</p>{evaluation.gaps.length > 0 && <p>待补充：{evaluation.gaps.join("、")}</p>}</div><AnswerComparisonView comparison={evaluation.comparison} answer={answer}/><MoreQuestions/><details className="feedback-actions"><summary>可选：把遗漏要点变成后续训练</summary><div className="feedback-actions-content"><Button variant="ghost" disabled={!llmConfigured || followUpBusy || Boolean(followUpQuestion)} onClick={generateFollowUp}><Sparkles size={16}/> {followUpBusy ? "正在生成追问…" : followUpQuestion ? "已生成追问" : "AI 拓展追问"}</Button>{feedbackNotice && <span className="muted-copy" role="status">{feedbackNotice}</span>}</div>{followUpQuestion && <section className="follow-up-card"><p className="eyebrow"><Sparkles size={15}/> AI 拓展追问</p><h3>{followUpQuestion}</h3><Button variant="secondary" disabled={followUpBusy || followUpDraftBusy} onClick={addFollowUpToLibrary}><BookOpenCheck size={16}/>{followUpDraftBusy ? "正在生成卡片草稿…" : "加入卡片库"}</Button>{!followUpFeedback ? <><textarea className="answer compact-answer" value={followUpAnswer} onChange={(event) => setFollowUpAnswer(event.target.value)} placeholder="回答这条追问；不会改变本卡的 FSRS 排程。" /><Button disabled={!followUpAnswer.trim() || followUpBusy} onClick={evaluateFollowUp}>{followUpBusy ? "正在评估…" : "提交追问回答"}</Button></> : <div className="feedback"><strong>{followUpFeedback.score} 分 · 追问反馈</strong><p>{followUpFeedback.feedback}</p>{followUpFeedback.gaps.length > 0 && <p>待补充：{followUpFeedback.gaps.join("、")}</p>}</div>}</section>}</details><Button variant="secondary" onClick={loadRandom}><Dices size={17}/> 再抽一题</Button></div> : <div className="stack"><section className="stack" data-tour="review-report"><div className="feedback"><strong>{evaluation.score} 分 · 建议：{evaluation.suggestedRating}</strong><p>{evaluation.feedback}</p>{evaluation.gaps.length > 0 && <p>待补充：{evaluation.gaps.join("、")}</p>}</div><AnswerComparisonView comparison={evaluation.comparison} answer={answer}/><MoreQuestions/></section><section className="review-rating-section" data-tour="review-rating"><div className="review-rating-heading"><div><p className="eyebrow">下一步：安排复习</p><h3>这次记得怎么样？</h3><p>选择后更新下一次复习计划。</p></div><span className="rating-shortcuts">快捷键 1–4</span></div><div className="rating-row"><Button className="again rating-choice" disabled={busy} onClick={() => confirm("again")}><span className="rating-key">1</span><strong>忘记</strong><small>重新练习</small></Button><Button className="hard rating-choice" disabled={busy} onClick={() => confirm("hard")}><span className="rating-key">2</span><strong>困难</strong><small>更快复习</small></Button><Button className="good rating-choice" disabled={busy} onClick={() => confirm("good")}><span className="rating-key">3</span><strong>良好</strong><small>按计划复习</small></Button><Button className="easy rating-choice" disabled={busy} onClick={() => confirm("easy")}><span className="rating-key">4</span><strong>轻松</strong><small>更长间隔</small></Button></div></section><details className="feedback-actions"><summary>可选：把遗漏要点变成后续训练</summary><div className="feedback-actions-content"><Button variant="secondary" onClick={() => actOnFeedback("weak")}>加入薄弱复习</Button><Button variant="outline" onClick={() => actOnFeedback("priority")}>下次优先练习</Button><Button variant="ghost" onClick={createSupplement}>生成补充卡</Button><Button variant="ghost" disabled={!llmConfigured || followUpBusy || Boolean(followUpQuestion)} onClick={generateFollowUp}><Sparkles size={16}/> {followUpBusy ? "正在生成追问…" : followUpQuestion ? "已生成追问" : "AI 拓展追问"}</Button>{queue === "weak" && <Button variant="ghost" onClick={() => actOnFeedback("removeWeak")}>移出薄弱队列</Button>}{feedbackNotice && <span className="muted-copy" role="status">{feedbackNotice}</span>}</div>{followUpQuestion && <section className="follow-up-card"><p className="eyebrow"><Sparkles size={15}/> AI 拓展追问</p><h3>{followUpQuestion}</h3><Button variant="secondary" disabled={followUpBusy || followUpDraftBusy} onClick={addFollowUpToLibrary}><BookOpenCheck size={16}/>{followUpDraftBusy ? "正在生成卡片草稿…" : "加入卡片库"}</Button>{!followUpFeedback ? <><textarea className="answer compact-answer" value={followUpAnswer} onChange={(event) => setFollowUpAnswer(event.target.value)} placeholder="回答这条追问；不会改变本卡的 FSRS 排程。" /><Button disabled={!followUpAnswer.trim() || followUpBusy} onClick={evaluateFollowUp}>{followUpBusy ? "正在评估…" : "提交追问回答"}</Button></> : <div className="feedback"><strong>{followUpFeedback.score} 分 · 追问反馈</strong><p>{followUpFeedback.feedback}</p>{followUpFeedback.gaps.length > 0 && <p>待补充：{followUpFeedback.gaps.join("、")}</p>}</div>}</section>}</details></div>}
     </article>
+    <ReviewLearningChat card={activeCard} llmConfigured={llmConfigured} defaultOpen={isInitial} />
+    </div>
   </PageLayout>;
 }

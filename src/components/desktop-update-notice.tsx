@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { ExternalLink, X } from "lucide-react";
 
-export type UpdateCheckResult = { state: "current"; currentVersion: string; latestVersion: string; url: string; releaseNotes: string } | { state: "available"; currentVersion: string; latestVersion: string; url: string; releaseNotes: string } | { state: "error"; currentVersion: string; message: string };
+export type UpdateCheckResult = { state: "current"; currentVersion: string; latestVersion: string; url: string; releaseNotes: string } | { state: "available"; currentVersion: string; latestVersion: string; url: string; releaseNotes: string } | { state: "error"; currentVersion: string; message: string; url?: string };
 
 type DesktopUpdateContextValue = { updateResult: UpdateCheckResult | null; setUpdateResult(result: UpdateCheckResult | null): void; lastCheckedAt: Date | null; setLastCheckedAt(date: Date | null): void; dismissUpdate(): void };
 const DesktopUpdateContext = createContext<DesktopUpdateContextValue | null>(null);
@@ -62,23 +62,6 @@ export function DesktopUpdateProvider({ children }: { children: React.ReactNode 
     } catch { /* Storage may be unavailable in a restricted browser context. */ }
   }, [lastCheckedAt, storageLoaded, updateResult]);
 
-  useEffect(() => {
-    if (!storageLoaded) return;
-    let active = true;
-    const checkForUpdates = async () => {
-      if (!window.mockInterviewDesktop) return;
-      try {
-        const result = await window.mockInterviewDesktop.updates.check() as UpdateCheckResult;
-        if (!active) return;
-        setUpdateResult(result);
-        setLastCheckedAt(new Date());
-      } catch {
-        if (active) setUpdateResult({ state: "error", currentVersion: "当前版本", message: "检查更新失败，请稍后重试。" });
-      }
-    };
-    void checkForUpdates();
-    return () => { active = false; };
-  }, [storageLoaded]);
   const dismissUpdate = () => { setUpdateResult(null); setLastCheckedAt(null); };
   return <DesktopUpdateContext.Provider value={{ updateResult, setUpdateResult, lastCheckedAt, setLastCheckedAt, dismissUpdate }}>{children}</DesktopUpdateContext.Provider>;
 }

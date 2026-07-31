@@ -24,12 +24,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isWindowsDesktop = typeof window !== "undefined" && window.mockInterviewDesktop?.platform === "win32";
   const [maximized, setMaximized] = useState(false);
+  const [serverError, setServerError] = useState("");
 
   useEffect(() => {
     if (!isWindowsDesktop) return;
     void window.mockInterviewDesktop?.window.isMaximized().then(setMaximized);
     return window.mockInterviewDesktop?.window.onMaximizeChange(setMaximized);
   }, [isWindowsDesktop]);
+  useEffect(() => window.mockInterviewDesktop?.server.onStatus((status) => {
+    setServerError(status.state === "error" ? status.message : "");
+  }), []);
 
   return <div className={isWindowsDesktop ? "app-frame desktop-windows" : "app-frame"}>
     <SemanticModelPrewarm />
@@ -48,6 +52,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     </aside>
     <main className="page-main" data-tour="page-main">{children}</main>
     <DesktopUpdatePrompt />
+    {serverError && <div className="desktop-server-error" role="alert">{serverError}</div>}
     <nav className="bottom-nav" aria-label="移动端主导航">{nav.map(([href, label, Icon]) => <Link key={href} href={href} data-tour={tourTargetForNav(href)} className={pathname === href ? "active" : ""}><Icon size={20}/><span>{label}</span></Link>)}</nav>
   </div>;
 }

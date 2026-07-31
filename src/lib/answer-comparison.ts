@@ -22,7 +22,9 @@ const MODEL_DOWNLOAD_URL = "https://huggingface.co/Xenova/bge-m3/resolve/main/on
 const MIN_MODEL_BYTES = 500 * 1024 * 1024;
 const MAX_DOWNLOAD_RETRIES = 3;
 const MODEL_DOWNLOAD_START_TIMEOUT_MS = 30_000;
+const MODEL_DOWNLOAD_IDLE_TIMEOUT_MS = 30_000;
 const MODEL_DOWNLOAD_START_TIMEOUT_ERROR = "模型下载在 30 秒内未开始。请检查网络连接，或切换为离线导入。";
+const MODEL_DOWNLOAD_IDLE_TIMEOUT_ERROR = "模型下载已超过 30 秒没有新进度。请检查网络后重试，或切换为离线导入。";
 export const LOCAL_EMBEDDING_MODEL_ARCHIVE_MAX_BYTES = 800 * 1024 * 1024;
 const LOCAL_MODEL_REQUIRED_FILES = ["config.json", "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json", "sentencepiece.bpe.model", "onnx/model_quantized.onnx"] as const;
 
@@ -324,8 +326,12 @@ async function downloadModelFile() {
   let downloadedBytes = await sizeOf(MODEL_PART_FILE);
   const controller = new AbortController();
   activeDownloadController = controller;
-  let timedOut = false;
-  const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, MODEL_DOWNLOAD_START_TIMEOUT_MS);
+  let timeoutError: string | null = null;
+  let timeout = setTimeout(() => { timeoutError = MODEL_DOWNLOAD_START_TIMEOUT_ERROR; controller.abort(); }, MODEL_DOWNLOAD_START_TIMEOUT_MS);
+  const resetIdleTimeout = () => {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => { timeoutError = MODEL_DOWNLOAD_IDLE_TIMEOUT_ERROR; controller.abort(); }, MODEL_DOWNLOAD_IDLE_TIMEOUT_MS);
+  };
   let response: Response;
   try {
     response = await fetch(MODEL_DOWNLOAD_URL, {
@@ -336,7 +342,7 @@ async function downloadModelFile() {
   } catch (error) {
     clearTimeout(timeout);
     if (activeDownloadController === controller) activeDownloadController = null;
-    if (timedOut) throw new Error(MODEL_DOWNLOAD_START_TIMEOUT_ERROR);
+    if (timeoutError) throw new Error(timeoutError);
     throw error;
   }
   if (!response.ok || !response.body) {
@@ -356,10 +362,13 @@ async function downloadModelFile() {
   try {
     const reader = response.body.getReader();
     while (true) {
-      const { done, value } = await reader.read();
+      let chunk: ReadableStreamReadResult<Uint8Array>;
+      try { chunk = await reader.read(); }
+      catch (error) { if (timeoutError) throw new Error(timeoutError); throw error; }
+      const { done, value } = chunk;
       if (done) break;
       if (!value) continue;
-      clearTimeout(timeout);
+      resetIdleTimeout();
       await file.write(value);
       downloadedBytes += value.byteLength;
       downloadStatus = { state: "downloading", onnxState: "pending", downloadedBytes, totalBytes, attempt: downloadStatus.attempt };
@@ -404,7 +413,7 @@ export function startLocalEmbeddingModelPrewarm() {
       } catch (error) {
         lastError = error instanceof Error ? error.message : lastError;
         if (prewarmCancelled || getAppSettings().embeddingModelSource === "offline") return;
-        if (lastError === MODEL_DOWNLOAD_START_TIMEOUT_ERROR) {
+        if (lastError === MODEL_DOWNLOAD_START_TIMEOUT_ERROR || lastError === MODEL_DOWNLOAD_IDLE_TIMEOUT_ERROR) {
           downloadStatus = { state: "error", onnxState: "pending", downloadedBytes: await sizeOf(MODEL_PART_FILE), totalBytes: null, attempt, error: lastError };
           return;
         }

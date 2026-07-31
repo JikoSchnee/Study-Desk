@@ -3,7 +3,7 @@ export {};
 type ManualUpdateStatus =
   | { state: "current"; currentVersion: string; latestVersion: string; url: string; releaseNotes: string }
   | { state: "available"; currentVersion: string; latestVersion: string; url: string; releaseNotes: string }
-  | { state: "error"; currentVersion: string; message: string };
+  | { state: "error"; currentVersion: string; message: string; url?: string };
 
 declare global {
   interface Window {
@@ -18,6 +18,9 @@ declare global {
       };
       updates: {
         check(): Promise<ManualUpdateStatus>;
+      };
+      server: {
+        onStatus(listener: (status: { state: "ready" } | { state: "error"; message: string }) => void): () => void;
       };
     };
   }

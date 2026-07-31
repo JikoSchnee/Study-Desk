@@ -9,13 +9,16 @@ export function SemanticModelPrewarm() {
     if (requested.current) return;
     requested.current = true;
     const timer = window.setTimeout(() => {
-      void fetch("/api/settings", { cache: "no-store" })
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 10_000);
+      void fetch("/api/settings", { cache: "no-store", signal: controller.signal })
         .then((response) => response.ok ? response.json() as Promise<{ embeddingModelSource?: string }> : null)
         .then((settings) => {
-          if (settings?.embeddingModelSource !== "offline") return fetch("/api/settings/prewarm", { method: "POST" });
+          if (settings?.embeddingModelSource !== "offline") return fetch("/api/settings/prewarm", { method: "POST", signal: controller.signal });
           return undefined;
         })
-        .catch(() => undefined);
+        .catch(() => undefined)
+        .finally(() => window.clearTimeout(timeout));
     }, 1_500);
     return () => window.clearTimeout(timer);
   }, []);
