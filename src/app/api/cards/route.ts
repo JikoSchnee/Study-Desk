@@ -77,6 +77,7 @@ export async function POST(request: Request) {
     const input = cardSchema.parse(await request.json());
     const { createCard } = await import("@/lib/cards");
     const created = createCard(input);
+    (await import("@/lib/auto-backup")).triggerAutoBackup();
     return NextResponse.json({ card: created }, { status: 201 });
   } catch (error) {
     if (isNativeAddonError(error)) return localApiErrorResponse("Failed to create a card", error, "无法保存卡片。");
@@ -90,6 +91,7 @@ export async function PATCH(request: Request) {
     const { updateCard } = await import("@/lib/cards");
     const card = updateCard(input.id, input);
     if (!card) return NextResponse.json({ error: "找不到卡片。" }, { status: 404 });
+    (await import("@/lib/auto-backup")).triggerAutoBackup();
     return NextResponse.json({ card });
   } catch (error) {
     if (isNativeAddonError(error)) return localApiErrorResponse("Failed to update a card", error, "无法更新卡片。");

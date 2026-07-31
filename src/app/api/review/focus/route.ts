@@ -11,5 +11,6 @@ export async function POST(request: Request) {
   if (input.action === "weak") setWeakPractice(input.cardId, true, input.gaps.join("、"));
   if (input.action === "priority") setPriorityPractice(input.cardId, true);
   if (input.action === "removeWeak") setWeakPractice(input.cardId, false);
+  (await import("@/lib/auto-backup")).triggerAutoBackup();
   return NextResponse.json({ ok: true });
 }

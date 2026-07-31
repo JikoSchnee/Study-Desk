@@ -28,7 +28,9 @@ export async function POST(request: Request) {
     if (!cards.length) return NextResponse.json({ error: "请先创建至少一张卡片" }, { status: 400 });
     const sessionId = randomUUID();
     sqlite.prepare("INSERT INTO interview_sessions (id, config, status, started_at) VALUES (?, ?, 'active', ?)").run(sessionId, JSON.stringify({ cardIds: cards.map((card) => card!.id), mode: input.mode, cursor: 0 }), new Date().toISOString());
-    return NextResponse.json({ sessionId, turn: newTurn(sessionId, cards[0]!.id, 1), total: cards.length });
+    const turn = newTurn(sessionId, cards[0]!.id, 1);
+    (await import("@/lib/auto-backup")).triggerAutoBackup();
+    return NextResponse.json({ sessionId, turn, total: cards.length });
   }
   if (body.action === "followup") {
     const input = followUpSchema.parse(body);
@@ -41,6 +43,7 @@ export async function POST(request: Request) {
     sqlite.prepare("INSERT INTO interview_turns (id, session_id, card_id, question, is_extension, parent_turn_id, created_at) VALUES (?, ?, ?, ?, 1, ?, ?)").run(id, input.sessionId, parent.card_id, question, input.turnId, new Date().toISOString());
     const session = sqlite.prepare("SELECT config FROM interview_sessions WHERE id = ?").get(input.sessionId) as { config: string } | undefined;
     const config = session ? JSON.parse(session.config) as { cursor: number } : { cursor: 0 };
+    (await import("@/lib/auto-backup")).triggerAutoBackup();
     return NextResponse.json({ turn: { id, question, index: config.cursor + 1, isExtension: true } });
   }
   if (body.action === "followupCardDraft") {
@@ -64,6 +67,7 @@ export async function POST(request: Request) {
   const evaluation = await evaluateAnswer({ ...card, question: turn.question }, input.answer, input.comparisonMode ?? getAppSettings().answerComparisonMode, input.comparisonProgressId);
   const otherQuestions = allQuestionTexts(card).filter((question) => question !== turn.question);
   sqlite.prepare("UPDATE interview_turns SET answer = ?, score = ?, feedback = ?, comparison_mode = ?, answer_comparison = ? WHERE id = ?").run(input.answer, evaluation.score, evaluation.feedback, evaluation.comparison.requestedMode, JSON.stringify(evaluation.comparison), input.turnId);
+  (await import("@/lib/auto-backup")).triggerAutoBackup();
   const session = sqlite.prepare("SELECT config FROM interview_sessions WHERE id = ?").get(input.sessionId) as { config: string };
   const config = JSON.parse(session.config) as { cardIds: string[]; cursor: number; mode: string };
   if (turn.is_extension) {

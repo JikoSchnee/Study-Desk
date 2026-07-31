@@ -14,7 +14,9 @@ export async function POST(request: Request) {
   try {
     const input = z.object({ chinese: z.string().optional(), english: z.string().optional() }).parse(await request.json());
     const { createTag } = await import("@/lib/tags");
-    return NextResponse.json({ tag: createTag(input) }, { status: 201 });
+    const tag = createTag(input);
+    (await import("@/lib/auto-backup")).triggerAutoBackup();
+    return NextResponse.json({ tag }, { status: 201 });
   } catch (error) {
     if (isNativeAddonError(error)) return localApiErrorResponse("Failed to create a tag", error, "无法创建标签。");
     return NextResponse.json({ error: error instanceof Error ? error.message : "无法创建标签。" }, { status: 400 });

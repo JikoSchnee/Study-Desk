@@ -12,6 +12,7 @@ export async function POST(request: Request) {
     if (input.action === "preview") return NextResponse.json({ preview: previewBackup(backup) });
     if (!input.mode) return NextResponse.json({ error: "请选择恢复模式。" }, { status: 400 });
     restoreBackup(backup, input.mode);
+    (await import("@/lib/auto-backup")).triggerAutoBackup();
     return NextResponse.json({ ok: true });
   } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "无法恢复备份。" }, { status: 400 }); }
 }

@@ -16,5 +16,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "每张卡片至少需要一条核心答案要点。" }, { status: 400 });
   }
   const result = await importCards(cards);
+  (await import("@/lib/auto-backup")).triggerAutoBackup();
   return NextResponse.json(result);
 }

@@ -17,5 +17,6 @@ export async function POST(request: Request) {
   if (!rating) return NextResponse.json({ error: "请选择记忆评级" }, { status: 400 });
   updateCardStatus(cardId, "review");
   const result = submitReview(cardId, answer, evaluation.score, evaluation.suggestedRating, rating, evaluation.comparison, presentedQuestion, evaluation.feedback);
+  (await import("@/lib/auto-backup")).triggerAutoBackup();
   return NextResponse.json({ evaluation, ...result });
 }

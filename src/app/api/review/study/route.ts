@@ -8,7 +8,9 @@ const schema = z.object({ cardId: z.string().uuid() });
 export async function POST(request: Request) {
   try {
     const { cardId } = schema.parse(await request.json());
-    return NextResponse.json(await completeInitialStudy(cardId));
+    const result = await completeInitialStudy(cardId);
+    (await import("@/lib/auto-backup")).triggerAutoBackup();
+    return NextResponse.json(result);
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "无法完成首次学习。" }, { status: 400 });
   }

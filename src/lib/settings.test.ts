@@ -31,4 +31,9 @@ describe("embedding model source setting", () => {
     expect(saveAppSettings(settings).knowledgeBasePath).toBe(settings.knowledgeBasePath);
     expect(database.run).toHaveBeenCalledWith("knowledgeBasePath", settings.knowledgeBasePath);
   });
+
+  it("enables daily automatic backups by default for existing installations", () => {
+    database.rows = [];
+    expect(getAppSettings()).toMatchObject({ autoBackupEnabled: true, autoBackupMode: "daily", autoBackupMaxStorageMb: 100, autoBackupOverflowPolicy: "delete-oldest" });
+  });
 });
