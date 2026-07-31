@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowRight, BookOpenCheck, BrainCircuit, CheckCircle2, ChevronLeft, ChevronRight, Dices, Eye, GraduationCap, Lightbulb, MessageSquareText, PencilLine, RefreshCw, Sparkles, Target } from "lucide-react";
@@ -36,11 +36,11 @@ function progressText(stats: { pending: number; completedToday: number }) {
 
 export default function ReviewPage() {
   const router = useRouter();
-  const [taskTarget] = usePageState("review:target", (() => {
+  const [taskTarget] = useState(() => {
     if (typeof window === "undefined") return { queue: null as string | null, cardId: null as string | null };
     const params = new URLSearchParams(window.location.search);
     return { queue: params.get("queue"), cardId: params.get("cardId") };
-  })());
+  });
   const [session, setSession] = usePageState<SessionKind | null>("review:session", null);
   const [card, setCard] = usePageState<Card | null | undefined>("review:card", null);
   const [learning, setLearning] = usePageState<CardLearningSummary | null>("review:learning", null);
@@ -69,6 +69,7 @@ export default function ReviewPage() {
   const [tagExpansion, setTagExpansion] = usePageState<Record<string, boolean>>("review:tag-expansion", {});
   const [learningChatOpen, setLearningChatOpen] = usePageState<boolean | null>("review:learning-chat-open", null);
   const studySaveTimers = useRef<Record<string, number>>({});
+  const launchedQueueTarget = useRef<string | null>(null);
   const reviewCardRef = useRef<HTMLElement | null>(null);
   const learningChatRef = useRef<HTMLElement | null>(null);
   const learningChatAnimationTimer = useRef<number | null>(null);
@@ -128,7 +129,12 @@ export default function ReviewPage() {
 
   useEffect(() => {
     const { queue, cardId } = taskTarget;
-    if (session === null && (queue === "initial" || queue === "review" || queue === "weak")) void loadSession(queue, [], cardId);
+    if (queue !== "initial" && queue !== "review" && queue !== "weak") return;
+    if (session === queue) return;
+    const target = `${queue}:${cardId ?? ""}`;
+    if (launchedQueueTarget.current === target) return;
+    launchedQueueTarget.current = target;
+    void loadSession(queue, [], cardId);
   }, [loadSession, session, taskTarget]);
   useEffect(() => () => Object.values(studySaveTimers.current).forEach((timer) => window.clearTimeout(timer)), []);
 
