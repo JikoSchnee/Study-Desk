@@ -26,7 +26,11 @@ const MODEL_DOWNLOAD_IDLE_TIMEOUT_MS = 30_000;
 const MODEL_DOWNLOAD_START_TIMEOUT_ERROR = "模型下载在 30 秒内未开始。请检查网络连接，或切换为离线导入。";
 const MODEL_DOWNLOAD_IDLE_TIMEOUT_ERROR = "模型下载已超过 30 秒没有新进度。请检查网络后重试，或切换为离线导入。";
 export const LOCAL_EMBEDDING_MODEL_ARCHIVE_MAX_BYTES = 800 * 1024 * 1024;
-const LOCAL_MODEL_REQUIRED_FILES = ["config.json", "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json", "sentencepiece.bpe.model", "onnx/model_quantized.onnx"] as const;
+// Keep this list aligned with the files Transformers.js loads for bge-m3. The
+// automatic download writes these four files; optional repository artifacts such
+// as special_tokens_map.json and sentencepiece.bpe.model must not make a usable
+// cached model look incomplete after a service restart.
+const LOCAL_MODEL_REQUIRED_FILES = ["config.json", "tokenizer.json", "tokenizer_config.json", "onnx/model_quantized.onnx"] as const;
 
 export type LocalEmbeddingModelStatus = {
   state: "pending" | "downloading" | "verifying" | "retrying" | "importing" | "ready" | "error";
@@ -166,20 +170,22 @@ async function sizeOf(path: string) {
   catch { return 0; }
 }
 
-async function hasCompleteLocalModelPackage(directory = EMBEDDING_MODEL_DIR) {
+export async function hasCompleteLocalModelPackage(directory = EMBEDDING_MODEL_DIR) {
   for (const file of LOCAL_MODEL_REQUIRED_FILES) {
     if (!await exists(join(directory, file))) return false;
   }
   return await sizeOf(join(directory, "onnx", "model_quantized.onnx")) >= MIN_MODEL_BYTES;
 }
 
-async function isModelReady() {
-  if (!await exists(MODEL_READY_FILE) || !await hasCompleteLocalModelPackage()) return false;
+export async function isLocalEmbeddingModelReady(directory = EMBEDDING_MODEL_DIR, readyFile = join(directory, ".complete.json")) {
+  if (!await exists(readyFile) || !await hasCompleteLocalModelPackage(directory)) return false;
   try {
-    const marker = JSON.parse(await readFile(MODEL_READY_FILE, "utf8")) as { model?: string };
+    const marker = JSON.parse(await readFile(readyFile, "utf8")) as { model?: string };
     return marker.model === LOCAL_EMBEDDING_MODEL;
   } catch { return false; }
 }
+
+async function isModelReady() { return isLocalEmbeddingModelReady(EMBEDDING_MODEL_DIR, MODEL_READY_FILE); }
 
 async function markModelReady() {
   await writeFile(MODEL_READY_FILE, JSON.stringify({ model: LOCAL_EMBEDDING_MODEL, completedAt: new Date().toISOString(), offline: await hasCompleteLocalModelPackage() }), "utf8");

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { compareLexically, comparisonFromLLM, evaluationFromComparison, importedModelArchiveRequirements, requiredModelFilesInArchive } from "./answer-comparison";
+import { mkdir, mkdtemp, rm, truncate, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { compareLexically, comparisonFromLLM, evaluationFromComparison, hasCompleteLocalModelPackage, importedModelArchiveRequirements, isLocalEmbeddingModelReady, requiredModelFilesInArchive } from "./answer-comparison";
 import type { Card } from "./types";
 
 const card: Card = {
@@ -20,6 +23,30 @@ describe("answer comparison", () => {
     expect(() => requiredModelFilesInArchive(complete.filter((path) => path !== "tokenizer.json"))).toThrow("tokenizer.json");
     expect(() => requiredModelFilesInArchive([...complete, "copy/config.json"])).toThrow("重复");
     expect(() => requiredModelFilesInArchive([...complete, "../unsafe.txt"])).toThrow("不安全");
+  });
+
+  it("recognizes the automatic-download cache without optional repository artifacts", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "study-desk-bge-m3-"));
+    try {
+      for (const file of importedModelArchiveRequirements().filter((file) => file !== "onnx/model_quantized.onnx")) {
+        const path = join(directory, file);
+        await mkdir(join(path, ".."), { recursive: true });
+        await writeFile(path, "{}");
+      }
+      const modelPath = join(directory, "onnx", "model_quantized.onnx");
+      await mkdir(join(modelPath, ".."), { recursive: true });
+      await writeFile(modelPath, "");
+      await truncate(modelPath, 500 * 1024 * 1024);
+
+      expect(await hasCompleteLocalModelPackage(directory)).toBe(true);
+      const markerPath = join(directory, ".complete.json");
+      await writeFile(markerPath, JSON.stringify({ model: "Xenova/bge-m3" }));
+      expect(await isLocalEmbeddingModelReady(directory, markerPath)).toBe(true);
+      await rm(markerPath);
+      expect(await isLocalEmbeddingModelReady(directory, markerPath)).toBe(false);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("maps exact local wording to its answer point and leaves unrelated points missing", () => {
