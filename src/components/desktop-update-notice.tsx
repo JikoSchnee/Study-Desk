@@ -2,39 +2,18 @@
 
 import { createContext, useContext, useEffect, useState } from "react";
 import { ExternalLink, X } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 export type UpdateCheckResult = { state: "current"; currentVersion: string; latestVersion: string; url: string; releaseNotes: string } | { state: "available"; currentVersion: string; latestVersion: string; url: string; releaseNotes: string } | { state: "error"; currentVersion: string; message: string; url?: string };
 
 type DesktopUpdateContextValue = { updateResult: UpdateCheckResult | null; setUpdateResult(result: UpdateCheckResult | null): void; lastCheckedAt: Date | null; setLastCheckedAt(date: Date | null): void; isUpdatePromptVisible: boolean; dismissUpdatePrompt(): void };
 const DesktopUpdateContext = createContext<DesktopUpdateContextValue | null>(null);
 const updateStatusStorageKey = "study-desk.update-status";
-const releaseNoteTags = new Set(["a", "b", "blockquote", "br", "code", "del", "details", "div", "em", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "i", "li", "ol", "p", "pre", "small", "span", "strong", "summary", "table", "tbody", "td", "th", "thead", "tr", "u", "ul"]);
-
-function isHtmlReleaseNotes(notes: string) { return /<\/?[a-z][^>]*>/i.test(notes); }
-function sanitizeReleaseNotesHtml(notes: string) {
-  if (typeof window === "undefined") return "";
-  const document = new DOMParser().parseFromString(notes, "text/html");
-  document.querySelectorAll("script, style, iframe, object, embed, link, meta, base, form, input, button, textarea, select").forEach((element) => element.remove());
-  document.body.querySelectorAll("*").forEach((element) => {
-    if (!releaseNoteTags.has(element.tagName.toLowerCase())) { element.replaceWith(...Array.from(element.childNodes)); return; }
-    for (const attribute of Array.from(element.attributes)) {
-      const name = attribute.name.toLowerCase();
-      const isAllowedLinkAttribute = element.tagName === "A" && ["href", "title"].includes(name);
-      const isAllowedGenericAttribute = name === "title" || name.startsWith("aria-");
-      if (!isAllowedLinkAttribute && !isAllowedGenericAttribute) element.removeAttribute(attribute.name);
-    }
-    if (element.tagName === "A") {
-      const href = element.getAttribute("href")?.trim() ?? "";
-      if (href && !/^(https?:|mailto:|#|\/)/i.test(href)) element.removeAttribute("href");
-      element.setAttribute("target", "_blank");
-      element.setAttribute("rel", "noreferrer");
-    }
-  });
-  return document.body.innerHTML;
-}
-
 export function ReleaseNotes({ notes }: { notes: string }) {
-  return <div className="desktop-release-notes">{isHtmlReleaseNotes(notes) ? <div dangerouslySetInnerHTML={{ __html: sanitizeReleaseNotesHtml(notes) }} /> : <pre>{notes}</pre>}</div>;
+  return <div className="desktop-release-notes readme-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{
+    a: ({ href, children, ...props }) => <a href={href} target="_blank" rel="noreferrer" {...props}>{children}</a>,
+  }}>{notes}</ReactMarkdown></div>;
 }
 
 export function DesktopUpdateProvider({ children }: { children: React.ReactNode }) {
