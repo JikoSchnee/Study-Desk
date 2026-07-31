@@ -21,6 +21,8 @@ const MODEL_READY_FILE = join(EMBEDDING_MODEL_DIR, ".complete.json");
 const MODEL_DOWNLOAD_URL = "https://huggingface.co/Xenova/bge-m3/resolve/main/onnx/model_quantized.onnx?download=true";
 const MIN_MODEL_BYTES = 500 * 1024 * 1024;
 const MAX_DOWNLOAD_RETRIES = 3;
+const MODEL_DOWNLOAD_START_TIMEOUT_MS = 30_000;
+const MODEL_DOWNLOAD_START_TIMEOUT_ERROR = "模型下载在 30 秒内未开始。请检查网络连接，或切换为离线导入。";
 export const LOCAL_EMBEDDING_MODEL_ARCHIVE_MAX_BYTES = 800 * 1024 * 1024;
 const LOCAL_MODEL_REQUIRED_FILES = ["config.json", "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json", "sentencepiece.bpe.model", "onnx/model_quantized.onnx"] as const;
 
@@ -35,6 +37,8 @@ export type LocalEmbeddingModelStatus = {
 
 let downloadStatus: LocalEmbeddingModelStatus = { state: "pending", onnxState: "pending", downloadedBytes: 0, totalBytes: null, attempt: 0 };
 let preparationPromise: Promise<void> | null = null;
+let activeDownloadController: AbortController | null = null;
+let prewarmCancelled = false;
 
 export function importedModelArchiveRequirements() { return [...LOCAL_MODEL_REQUIRED_FILES]; }
 
@@ -318,11 +322,28 @@ async function downloadModelFile() {
   else if (finalSize > 0) await rm(MODEL_FILE, { force: true });
 
   let downloadedBytes = await sizeOf(MODEL_PART_FILE);
-  const response = await fetch(MODEL_DOWNLOAD_URL, {
-    headers: downloadedBytes ? { Range: `bytes=${downloadedBytes}-` } : undefined,
-    cache: "no-store",
-  });
-  if (!response.ok || !response.body) throw new Error(`模型下载请求失败（HTTP ${response.status}）。`);
+  const controller = new AbortController();
+  activeDownloadController = controller;
+  let timedOut = false;
+  const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, MODEL_DOWNLOAD_START_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(MODEL_DOWNLOAD_URL, {
+      headers: downloadedBytes ? { Range: `bytes=${downloadedBytes}-` } : undefined,
+      cache: "no-store",
+      signal: controller.signal,
+    });
+  } catch (error) {
+    clearTimeout(timeout);
+    if (activeDownloadController === controller) activeDownloadController = null;
+    if (timedOut) throw new Error(MODEL_DOWNLOAD_START_TIMEOUT_ERROR);
+    throw error;
+  }
+  if (!response.ok || !response.body) {
+    clearTimeout(timeout);
+    if (activeDownloadController === controller) activeDownloadController = null;
+    throw new Error(`模型下载请求失败（HTTP ${response.status}）。`);
+  }
 
   const resuming = downloadedBytes > 0 && response.status === 206;
   if (downloadedBytes > 0 && !resuming) {
@@ -338,11 +359,16 @@ async function downloadModelFile() {
       const { done, value } = await reader.read();
       if (done) break;
       if (!value) continue;
+      clearTimeout(timeout);
       await file.write(value);
       downloadedBytes += value.byteLength;
       downloadStatus = { state: "downloading", onnxState: "pending", downloadedBytes, totalBytes, attempt: downloadStatus.attempt };
     }
-  } finally { await file.close(); }
+  } finally {
+    clearTimeout(timeout);
+    if (activeDownloadController === controller) activeDownloadController = null;
+    await file.close();
+  }
 
   if (totalBytes !== null && downloadedBytes !== totalBytes) throw new Error("模型下载未完成，请稍后重试。");
   if (downloadedBytes < MIN_MODEL_BYTES) throw new Error("模型文件不完整，请稍后重试。");
@@ -359,6 +385,7 @@ async function ensureModelFile() {
 export function startLocalEmbeddingModelPrewarm() {
   if (getAppSettings().embeddingModelSource === "offline") return;
   if (preparationPromise) return;
+  prewarmCancelled = false;
   preparationPromise = (async () => {
     if (await isModelReady()) {
       downloadStatus = { state: "ready", onnxState: "ready", downloadedBytes: await sizeOf(MODEL_FILE), totalBytes: await sizeOf(MODEL_FILE), attempt: 0 };
@@ -366,6 +393,7 @@ export function startLocalEmbeddingModelPrewarm() {
     }
     let lastError = "本地模型预热失败。";
     for (let attempt = 1; attempt <= MAX_DOWNLOAD_RETRIES; attempt += 1) {
+      if (prewarmCancelled || getAppSettings().embeddingModelSource === "offline") return;
       downloadStatus = { state: attempt === 1 ? "downloading" : "retrying", onnxState: "pending", downloadedBytes: await sizeOf(MODEL_PART_FILE), totalBytes: null, attempt };
       try {
         await getEmbedder();
@@ -375,6 +403,11 @@ export function startLocalEmbeddingModelPrewarm() {
         return;
       } catch (error) {
         lastError = error instanceof Error ? error.message : lastError;
+        if (prewarmCancelled || getAppSettings().embeddingModelSource === "offline") return;
+        if (lastError === MODEL_DOWNLOAD_START_TIMEOUT_ERROR) {
+          downloadStatus = { state: "error", onnxState: "pending", downloadedBytes: await sizeOf(MODEL_PART_FILE), totalBytes: null, attempt, error: lastError };
+          return;
+        }
         // Keep a partially transferred file so the next request can resume it.
         // A complete-but-unloadable model, on the other hand, is corrupt and must
         // be removed before retrying.
@@ -386,6 +419,24 @@ export function startLocalEmbeddingModelPrewarm() {
     }
     downloadStatus = { state: "error", onnxState: downloadStatus.onnxState === "parsing" ? "failed" : "pending", downloadedBytes: 0, totalBytes: null, attempt: MAX_DOWNLOAD_RETRIES, error: lastError };
   })().finally(() => { preparationPromise = null; });
+}
+
+/** Stops a pending automatic download when the user chooses offline mode. */
+export function stopLocalEmbeddingModelPrewarm() {
+  prewarmCancelled = true;
+  activeDownloadController?.abort();
+  activeDownloadController = null;
+  downloadStatus = { state: "error", onnxState: "pending", downloadedBytes: downloadStatus.downloadedBytes, totalBytes: downloadStatus.totalBytes, attempt: downloadStatus.attempt, error: "已停止自动下载，当前为离线导入模式。" };
+}
+
+/** Removes the cached model downloaded by the automatic mode. */
+export async function removeAutomaticallyDownloadedEmbeddingModel() {
+  const activePreparation = preparationPromise;
+  stopLocalEmbeddingModelPrewarm();
+  await activePreparation;
+  await clearModelCache();
+  downloadStatus = { state: "pending", onnxState: "pending", downloadedBytes: 0, totalBytes: null, attempt: 0 };
+  return getLocalEmbeddingModelStatus();
 }
 
 /** Removes the cached model and starts a fresh background download when no job is active. */

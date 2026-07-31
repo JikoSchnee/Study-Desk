@@ -15,6 +15,21 @@ type DashboardData = {
   totals: { dueReview: number; reviewedToday: number; completed: number };
 };
 
+async function readDashboardResponse(response: Response) {
+  const body = await response.text();
+  let result: Partial<DashboardData> & { error?: string };
+  try {
+    result = JSON.parse(body) as Partial<DashboardData> & { error?: string };
+  } catch {
+    const detail = response.headers.get("content-type")?.includes("text/html")
+      ? "本地服务返回了错误页面。"
+      : "本地服务返回了无法识别的数据。";
+    throw new Error(`读取今日计划失败（HTTP ${response.status}）：${detail}`);
+  }
+  if (!response.ok) throw new Error(result.error ?? `读取今日计划失败（HTTP ${response.status}）。`);
+  return result;
+}
+
 function TutorialLauncher({ onLaunch }: { onLaunch: () => void }) {
   const frame = useRef<number | null>(null);
   const last = useRef(0);
@@ -78,8 +93,7 @@ export default function TodayPage() {
     setLoadError("");
     try {
       const response = await fetch("/api/dashboard", { cache: "no-store", signal: controller.signal });
-      const result = await response.json() as Partial<DashboardData> & { error?: string };
-      if (!response.ok) throw new Error(result.error ?? `读取今日计划失败（HTTP ${response.status}）。`);
+      const result = await readDashboardResponse(response);
       if (!Array.isArray(result.tasks) || !result.totals) throw new Error("今日计划返回的数据不完整。");
       setData(result as DashboardData);
     } catch (error) {

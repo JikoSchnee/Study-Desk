@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { parseBackup, previewBackup, restoreBackup } from "@/lib/backup";
 
 const schema = z.object({ action: z.enum(["preview", "restore"]), backup: z.unknown(), mode: z.enum(["merge", "replace"]).optional() });
 export async function POST(request: Request) {
   try {
+    // Keep SQLite startup failures inside the JSON API boundary for desktop
+    // clients, rather than letting Next render an HTML error document.
+    const { parseBackup, previewBackup, restoreBackup } = await import("@/lib/backup");
     const input = schema.parse(await request.json());
     const backup = parseBackup(input.backup);
     if (input.action === "preview") return NextResponse.json({ preview: previewBackup(backup) });
