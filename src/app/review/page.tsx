@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowRight, BookOpenCheck, BrainCircuit, CheckCircle2, ChevronLeft, ChevronRight, Dices, Eye, GraduationCap, Lightbulb, MessageSquareText, PencilLine, RefreshCw, Sparkles, Target } from "lucide-react";
 import { Button, Chip, EmptyState } from "@/components/ui";
 import { PageHeader, PageLayout } from "@/components/page-layout";
@@ -34,13 +34,11 @@ function progressText(stats: { pending: number; completedToday: number }) {
   return `今日完成 ${stats.completedToday} · 待完成 ${stats.pending}`;
 }
 
-export default function ReviewPage() {
+function ReviewPageContent() {
   const router = useRouter();
-  const [taskTarget] = useState(() => {
-    if (typeof window === "undefined") return { queue: null as string | null, cardId: null as string | null };
-    const params = new URLSearchParams(window.location.search);
-    return { queue: params.get("queue"), cardId: params.get("cardId") };
-  });
+  const searchParams = useSearchParams();
+  const targetQueue = searchParams.get("queue");
+  const targetCardId = searchParams.get("cardId");
   const [session, setSession] = usePageState<SessionKind | null>("review:session", null);
   const [card, setCard] = usePageState<Card | null | undefined>("review:card", null);
   const [learning, setLearning] = usePageState<CardLearningSummary | null>("review:learning", null);
@@ -128,14 +126,13 @@ export default function ReviewPage() {
   }, []);
 
   useEffect(() => {
-    const { queue, cardId } = taskTarget;
-    if (queue !== "initial" && queue !== "review" && queue !== "weak") return;
-    if (session === queue) return;
-    const target = `${queue}:${cardId ?? ""}`;
+    if (targetQueue !== "initial" && targetQueue !== "review" && targetQueue !== "weak") return;
+    if (session === targetQueue) return;
+    const target = `${targetQueue}:${targetCardId ?? ""}`;
     if (launchedQueueTarget.current === target) return;
     launchedQueueTarget.current = target;
-    void loadSession(queue, [], cardId);
-  }, [loadSession, session, taskTarget]);
+    void loadSession(targetQueue, [], targetCardId);
+  }, [loadSession, session, targetCardId, targetQueue]);
   useEffect(() => () => Object.values(studySaveTimers.current).forEach((timer) => window.clearTimeout(timer)), []);
 
   useEffect(() => {
@@ -400,4 +397,8 @@ export default function ReviewPage() {
     <ReviewLearningChat card={activeCard} llmConfigured={llmConfigured} open={chatOpen} onOpenChange={setChatOpenWithFlip} panelRef={learningChatRef} />
     </div>
   </PageLayout>;
+}
+
+export default function ReviewPage() {
+  return <Suspense fallback={<div className="loading">正在准备今天的练习…</div>}><ReviewPageContent /></Suspense>;
 }
