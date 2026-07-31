@@ -3,6 +3,7 @@
 import { FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Archive, ArrowDown, ArrowUp, ArrowUpDown, CalendarClock, CheckCircle2, Clock3, Download, FilePlus2, FileSpreadsheet, LayoutGrid, LibraryBig, MessageSquareText, MoreHorizontal, PencilLine, Search, Sparkles, Tag, Tags, Trash2, Undo2, X } from "lucide-react";
 import { CardWorkspace } from "@/components/card-workspace";
+import { BulkCardEditDialog } from "@/components/bulk-card-edit-dialog";
 import { CardDetailsDialog } from "@/components/card-details-dialog";
 import { AnswerStructureEditor as AnswerPointsEditor, cardRecommendationDraftKey, cardRecommendationExcludedIds, type CardRecommendationDraft, type CardRecommendationResult, QuestionWordingsEditor, RelatedCardsEditor, TagRecommendations, useCardRecommendations } from "@/components/card-form-editors";
 import { RarityPreviewDialog } from "@/components/rarity-preview-dialog";
@@ -18,11 +19,13 @@ import { TourButton } from "@/components/tour";
 import { difficultyTier, type CardSort, type SortDirection } from "@/lib/card-filters";
 import { rarityPreset, stabilityRarityTier, type StabilityRarityPreset } from "@/lib/card-tiers";
 import { answerPointsToNumberedText, splitTags } from "@/lib/import";
+import { withTrackTag } from "@/lib/utils";
 import type { AnswerPoint, Card, CardLearningDetails, CardLearningSummary, CardRelation, CardRelationType, QuestionVariant, Tag as TagItem, TagDisplayLanguage } from "@/lib/types";
 
 type CardDraft = { question: string; questionVariants: QuestionVariant[]; relations: CardRelation[]; answerPoints: AnswerPoint[]; note: string; track: string; tags: string; source: string };
 type EditorSaveState = "idle" | "saving" | "success";
 type WorkspaceMode = "manual" | "import";
+type BulkEditMode = "tags" | "track";
 const defaultKnowledgeBaseTypes = ["Agent", "Java 后端", "计算机基础"];
 const cardsPageSize = 20;
 type CardPage = { cards: Card[]; learning: Record<string, CardLearningSummary>; total: number; hasMore: boolean; facets: { tracks: string[]; tags: string[] } };
@@ -190,6 +193,7 @@ export function CardLibrary() {
   const [tagDisplayLanguage, setTagDisplayLanguage] = useState<TagDisplayLanguage>("zh");
   const [stabilityRarityPreset, setStabilityRarityPreset] = useState<StabilityRarityPreset>("memory-cycle");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkEditMode, setBulkEditMode] = useState<BulkEditMode | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode | null>(null);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
@@ -211,6 +215,13 @@ export function CardLibrary() {
     return { draftKey: cardRecommendationDraftKey(persistedDraft), excludedIds: cardRecommendationExcludedIds(editingCard.id, editingCard.relations), result: preloadedEditorResult };
   }, [editingCard, preloadedEditorResult]);
   const editorRecommendations = useCardRecommendations(editorRecommendationDraft, editingCard?.id, editingDraft?.relations ?? [], preloadedEditorRecommendations);
+  useEffect(() => {
+    setEditingDraft((draft) => {
+      if (!draft) return draft;
+      const tags = withTrackTag(draft.track, splitTags(draft.tags)).join(", ");
+      return tags === draft.tags ? draft : { ...draft, tags };
+    });
+  }, [editingDraft?.track]);
 
   const loadCardsPage = useCallback(async (offset: number, replace = false) => {
     if (replace) { cardsRequestGeneration.current += 1; cardsRequestController.current?.abort(); setCardsLoading(true); setReturnScrollPosition(null); }
@@ -433,12 +444,23 @@ export function CardLibrary() {
     event.preventDefault();
     toggleSelected(id);
   };
-  const bulk = async (action: "archive" | "restore" | "move" | "addTags" | "delete", value?: string | string[], ids = [...selectedIds]) => {
-    if (!ids.length || (action === "delete" && !window.confirm(`永久删除 ${ids.length} 张卡片及其学习记录？此操作无法撤销。`))) return;
-    const response = await fetch("/api/cards/bulk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, ids, value }) });
-    const data = await response.json();
-    if (!response.ok) { setNotice(data.error ?? "批量操作失败。"); return; }
-    recommendationPreload.clear(); setSelectedIds(new Set()); setNotice(action === "delete" ? "已永久删除所选卡片和关联记录。" : "已更新所选卡片。"); await load();
+  const bulk = async (action: "archive" | "restore" | "move" | "addTags" | "delete", value?: string | string[], ids = [...selectedIds]): Promise<string | null> => {
+    if (!ids.length) return "请先选择至少一张卡片。";
+    if (action === "delete" && !window.confirm(`永久删除 ${ids.length} 张卡片及其学习记录？此操作无法撤销。`)) return "";
+    try {
+      const response = await fetch("/api/cards/bulk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, ids, value }) });
+      const body = await response.text();
+      let data: { error?: string };
+      try { data = JSON.parse(body) as { error?: string }; }
+      catch { throw new Error(`本地服务返回了无法识别的数据（HTTP ${response.status}）。`); }
+      if (!response.ok) throw new Error(data.error ?? "批量操作失败。");
+      recommendationPreload.clear(); setSelectedIds(new Set()); setNotice(action === "delete" ? "已永久删除所选卡片和关联记录。" : "已更新所选卡片。"); await load();
+      return null;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "批量操作失败。";
+      setNotice(message);
+      return message;
+    }
   };
   const exportSelected = (format: "json" | "csv") => {
     const selected = cards.filter((card) => selectedIds.has(card.id));
@@ -459,7 +481,7 @@ export function CardLibrary() {
     window.scrollTo({ top: 0, behavior });
   };
 
-  return <PageLayout className="cards-library-page">{detail && <CardDetailsDialog card={detail.card} relatedCards={detail.relatedCards} learning={detail.learning} onClose={() => setDetail(null)} />}{rarityPreviewOpen && <RarityPreviewDialog preset={stabilityRarityPreset} onClose={() => setRarityPreviewOpen(false)} />}{knowledgeExamplesOpen && <KnowledgeBaseExamplesDialog preset={stabilityRarityPreset} onClose={() => setKnowledgeExamplesOpen(false)} />}{tagManagerOpen && <TagManagerDialog tags={tagCatalog} language={tagDisplayLanguage} onClose={() => setTagManagerOpen(false)} onChange={load} />}<LLMConfigurationDialog open={needsLLMConfiguration} onClose={() => setNeedsLLMConfiguration(false)} purpose="AI 补充问法" />
+  return <PageLayout className="cards-library-page">{detail && <CardDetailsDialog card={detail.card} relatedCards={detail.relatedCards} learning={detail.learning} onClose={() => setDetail(null)} />}{rarityPreviewOpen && <RarityPreviewDialog preset={stabilityRarityPreset} onClose={() => setRarityPreviewOpen(false)} />}{knowledgeExamplesOpen && <KnowledgeBaseExamplesDialog preset={stabilityRarityPreset} onClose={() => setKnowledgeExamplesOpen(false)} />}{tagManagerOpen && <TagManagerDialog tags={tagCatalog} language={tagDisplayLanguage} onClose={() => setTagManagerOpen(false)} onChange={load} />}{bulkEditMode && <BulkCardEditDialog mode={bulkEditMode} cardCount={selectedIds.size} tags={tags} tracks={knowledgeBaseTypeSuggestions} onClose={() => setBulkEditMode(null)} onSubmit={(value) => bulk(bulkEditMode === "tags" ? "addTags" : "move", value)} />}<LLMConfigurationDialog open={needsLLMConfiguration} onClose={() => setNeedsLLMConfiguration(false)} purpose="AI 补充问法" />
     <PageHeader eyebrow={<><LibraryBig size={15}/> 卡片库</>} title="把积累的知识，随时翻出来练。" description="筛选、编辑或查看学习轨迹，让每一张卡片保持可用。" tour="library" actionRows={<div className="library-header-actions"><div className="library-header-action-row"><Button type="button" variant="secondary" onClick={() => setTagManagerOpen(true)}><Tags size={17}/> 标签管理</Button><Button type="button" variant="secondary" onClick={() => setKnowledgeExamplesOpen(true)}><LayoutGrid size={17}/> 知识库示例</Button><TourButton tour="library" iconOnly /></div><div className="library-header-action-row"><Button type="button" onClick={() => openWorkspace("manual")} data-tour="library-create-card"><FilePlus2 size={17}/> 创建卡片</Button><div className="cards-import-actions"><Button type="button" variant="secondary" onClick={() => openWorkspace("import")}><FileSpreadsheet size={17}/> 导入卡片</Button><details className="template-download"><summary>下载模板文件</summary><div className="template-download-options"><p>CSV 模板中，其他问法、答案要点和回忆提示均可在同一单元格内换行；答案与提示会按行配对。</p><a href="/cards-import-template.md" download>Markdown 模板</a><a href="/cards-import-template.csv" download>CSV 模板（完整字段）</a></div></details></div></div></div>} />
     {notice && <div className="notice" role="status" style={{ marginBottom: 20 }}>{notice}</div>}
     <div className={`library-workspace ${workspaceOpen ? "open" : ""}`} aria-hidden={!workspaceOpen}><div className="library-workspace-inner">{workspaceMode && <CardWorkspace key={workspaceMode} initialMode={workspaceMode} onClose={closeWorkspace} onComplete={completeWorkspace} />}</div></div>
@@ -484,7 +506,7 @@ export function CardLibrary() {
           <button type="button" className="sort-direction" onClick={() => setSortDirection((direction) => direction === "asc" ? "desc" : "asc")} aria-label={sortDirection === "asc" ? "切换为降序" : "切换为升序"} title={sortDirection === "asc" ? "当前：升序" : "当前：降序"}><ArrowUpDown size={17}/>{sortDirection === "asc" ? "升序" : "降序"}</button>
           <button type="button" className="clear-card-filters" onClick={clearFilters}>清除筛选</button>
         </div>
-      </div><div data-tour="library-selection">{selectedIds.size > 0 && <div className="bulk-card-toolbar" role="status"><strong>已选择 {selectedIds.size} 张</strong>{showArchived ? <Button variant="secondary" onClick={() => bulk("restore")}><Undo2 size={16}/> 恢复</Button> : <Button variant="secondary" onClick={() => bulk("archive")}><Archive size={16}/> 归档</Button>}<Button variant="ghost" onClick={() => { const value = window.prompt("添加标签（用逗号分隔）"); if (value) void bulk("addTags", splitTags(value)); }}><Tag size={16}/> 添加标签</Button><Button variant="ghost" onClick={() => { const value = window.prompt("移动到知识库类型"); if (value) void bulk("move", value); }}>移动类型</Button><Button variant="ghost" onClick={() => exportSelected("csv")}><Download size={16}/> CSV</Button><Button variant="ghost" onClick={() => exportSelected("json")}><Download size={16}/> JSON</Button><Button variant="danger" onClick={() => bulk("delete")}><Trash2 size={16}/> 永久删除</Button><button type="button" className="clear-card-filters" onClick={() => setSelectedIds(new Set())}>取消选择</button></div>}</div></>
+      </div><div data-tour="library-selection">{selectedIds.size > 0 && <div className="bulk-card-toolbar" role="status"><strong>已选择 {selectedIds.size} 张</strong>{showArchived ? <Button variant="secondary" onClick={() => void bulk("restore")}><Undo2 size={16}/> 恢复</Button> : <Button variant="secondary" onClick={() => void bulk("archive")}><Archive size={16}/> 归档</Button>}<Button variant="ghost" onClick={() => setBulkEditMode("tags")}><Tag size={16}/> 添加标签</Button><Button variant="ghost" onClick={() => setBulkEditMode("track")}>移动类型</Button><Button variant="ghost" onClick={() => exportSelected("csv")}><Download size={16}/> CSV</Button><Button variant="ghost" onClick={() => exportSelected("json")}><Download size={16}/> JSON</Button><Button variant="danger" onClick={() => void bulk("delete")}><Trash2 size={16}/> 永久删除</Button><button type="button" className="clear-card-filters" onClick={() => setSelectedIds(new Set())}>取消选择</button></div>}</div></>
       {cardsLoading ? <div className="cards-loading" role="status">正在加载卡片…</div> : cardsTotal ? cards.length ? <><div className="card-grid">{cards.map((card) => {
         const learning = learningByCardId[card.id];
         const difficulty = difficultyTier(learning?.fsrsDifficulty);
