@@ -35,6 +35,16 @@ export function ensureDailyPlan(date = todayShanghai()) {
   return listDailyTasks(date);
 }
 
+/** Clear unfinished plans from earlier days, then rebuild today's plan from the current queue. */
+export function restartDailyPlan(date = todayShanghai()) {
+  sqlite.transaction(() => {
+    sqlite.prepare("UPDATE daily_tasks SET status = 'skipped' WHERE plan_date < ? AND status = 'todo'").run(date);
+    sqlite.prepare("DELETE FROM daily_tasks WHERE plan_date = ?").run(date);
+    sqlite.prepare("DELETE FROM daily_plans WHERE date = ?").run(date);
+  })();
+  return ensureDailyPlan(date);
+}
+
 export function listDailyTasks(date = todayShanghai()) {
   return (sqlite.prepare("SELECT * FROM daily_tasks WHERE plan_date = ? ORDER BY CASE kind WHEN 'review' THEN 1 WHEN 'learn' THEN 2 WHEN 'interview' THEN 3 ELSE 4 END").all(date) as Record<string, unknown>[]).map(rowToTask);
 }
