@@ -46,3 +46,8 @@ export function saveEmbeddingModelSource(embeddingModelSource: EmbeddingModelSou
   sqlite.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run("embeddingModelSource", embeddingModelSource);
   return embeddingModelSource;
 }
+
+export function saveKnowledgeBasePath(knowledgeBasePath: string) {
+  sqlite.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run("knowledgeBasePath", knowledgeBasePath);
+  return knowledgeBasePath;
+}

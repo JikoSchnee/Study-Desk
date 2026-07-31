@@ -30,8 +30,12 @@ export async function PUT(request: Request) {
 }
 export async function PATCH(request: Request) {
   try {
-    const input = z.object({ embeddingModelSource: z.enum(["automatic", "offline"]) }).parse(await request.json());
-    const { getAppSettings, saveEmbeddingModelSource } = await import("@/lib/settings");
+    const input = z.union([
+      z.object({ embeddingModelSource: z.enum(["automatic", "offline"]) }),
+      z.object({ knowledgeBasePath: z.string().trim().max(4096) }),
+    ]).parse(await request.json());
+    const { getAppSettings, saveEmbeddingModelSource, saveKnowledgeBasePath } = await import("@/lib/settings");
+    if ("knowledgeBasePath" in input) return NextResponse.json({ ...getAppSettings(), knowledgeBasePath: saveKnowledgeBasePath(input.knowledgeBasePath) });
     const embeddingModelSource = saveEmbeddingModelSource(input.embeddingModelSource);
     if (embeddingModelSource === "offline") {
       const { stopLocalEmbeddingModelPrewarm } = await import("@/lib/answer-comparison");
