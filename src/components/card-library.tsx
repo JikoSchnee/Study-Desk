@@ -228,7 +228,7 @@ export function CardLibrary() {
       const tags = withTrackTag(draft.track, splitTags(draft.tags)).join(", ");
       return tags === draft.tags ? draft : { ...draft, tags };
     });
-  }, [editingDraft?.track]);
+  }, [editingDraft?.track, setEditingDraft]);
 
   const loadCardsPage = useCallback(async (offset: number, replace = false) => {
     if (replace) { cardsRequestGeneration.current += 1; cardsRequestController.current?.abort(); setCardsLoading(true); setCardsError(""); setReturnScrollPosition(null); }
@@ -282,7 +282,7 @@ export function CardLibrary() {
       setWorkspaceMode("manual");
       setWorkspaceOpen(true);
     }
-  }, []);
+  }, [setWorkspaceMode, setWorkspaceOpen]);
   useEffect(() => {
     if (!loadMoreNode || !hasMoreCards || cardsLoading || cardsLoadingMore) return;
     const observer = new IntersectionObserver(([entry]) => {
@@ -384,7 +384,7 @@ export function CardLibrary() {
   };
   const completeCardSave = useCallback(() => {
     setEditingCard(null); setEditingDraft(null); setAiCandidates([]); setEditorSaveError(""); setEditorSaveState("idle"); setEditBusy(false);
-  }, []);
+  }, [setEditingCard, setEditingDraft]);
   useEffect(() => {
     if (editorSaveState === "idle") return;
     const frame = window.requestAnimationFrame(() => editorSaveStatusRef.current?.focus({ preventScroll: true }));
@@ -404,7 +404,7 @@ export function CardLibrary() {
     } catch (error) { setNotice(error instanceof Error ? error.message : "无法读取卡片详情。"); }
     finally { setDetailLoading(null); }
   };
-  const openCardEditor = (card: Card) => {
+  const openCardEditor = useCallback((card: Card) => {
     setEditingCard(card);
     setEditingDraft({ question: card.question, questionVariants: card.questionVariants.map((item) => ({ ...item })), relations: card.relations, answerPoints: card.answerPoints.map((item) => ({ ...item })), note: card.note, track: card.track, tags: card.tags.join(", "), source: card.source ?? "" });
     setAiCandidates([]);
@@ -412,13 +412,13 @@ export function CardLibrary() {
     setEditorSaveError("");
     setNotice("");
     void fetchJson<{ cards: Card[] }>("/api/cards/options", { label: "读取关联卡片" }).then((data) => setRelationCards(data.cards)).catch(() => setRelationCards(cards));
-  };
+  }, [cards, setEditingCard, setEditingDraft]);
   useEffect(() => {
     if (!editCardId || editingCard?.id === editCardId) return;
     const loaded = cards.find((card) => card.id === editCardId);
     if (loaded) { openCardEditor(loaded); return; }
     void fetchJson<{ card: Card }>(`/api/cards/${editCardId}/details`, { label: "读取卡片" }).then((data) => openCardEditor(data.card)).catch(() => setNotice("无法打开这张卡片的编辑窗口。"));
-  }, [cards, editCardId, editingCard?.id]);
+  }, [cards, editCardId, editingCard?.id, openCardEditor]);
   const generateVariants = async (question: string, answerPoints: AnswerPoint[], existing: QuestionVariant[]) => {
     if (question.trim().length < 3 || !answerPoints.some((item) => item.content.trim())) { setNotice("请先填写主问题和至少一条答案要点，再让 AI 补充问法。"); return; }
     setAiBusy(true); setNotice("");

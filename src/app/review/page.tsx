@@ -80,7 +80,7 @@ function ReviewPageContent() {
     if (!response.ok) throw new Error("无法读取练习队列");
     const data = await response.json();
     setProgress(data.progress);
-  }, []);
+  }, [setProgress]);
 
   useEffect(() => {
     void loadQueueProgress().catch(() => setProgress({ initial: { pending: 0, completedToday: 0 }, review: { pending: 0, completedToday: 0 }, weak: { pending: 0, completedToday: 0 } }));
@@ -89,7 +89,7 @@ function ReviewPageContent() {
       setComparisonMode(settings.answerComparisonMode === "llm" && configured ? "llm" : "embedding");
       setLlmConfigured(configured);
     }).catch(() => undefined);
-  }, [loadQueueProgress]);
+  }, [loadQueueProgress, setComparisonMode, setLlmConfigured, setProgress]);
 
   const loadSession = useCallback(async (nextSession: SessionKind, excludedIds: string[] = [], requestedCardId?: string | null) => {
     setSession(nextSession);
@@ -123,7 +123,7 @@ function ReviewPageContent() {
     } catch {
       setCard(null);
     }
-  }, []);
+  }, [setActiveHint, setAnswer, setCard, setEvaluation, setFeedbackNotice, setFollowUpAnswer, setFollowUpDraftBusy, setFollowUpFeedback, setFollowUpQuestion, setLearning, setPresentedQuestion, setProgress, setRevealedStudyPoints, setSeenRandomIds, setSession, setStudyBusy, setStudyError]);
 
   useEffect(() => {
     if (targetQueue !== "initial" && targetQueue !== "review" && targetQueue !== "weak") return;
@@ -139,7 +139,7 @@ function ReviewPageContent() {
     if (!card || !session || evaluation) return;
     const saved = window.localStorage.getItem(`mock-interview:draft:${session}:${card.id}`);
     if (saved) setAnswer(saved);
-  }, [card, evaluation, session]);
+  }, [card, evaluation, session, setAnswer]);
 
   useEffect(() => {
     if (!card || !session || !answer.trim() || evaluation) return;
@@ -164,7 +164,7 @@ function ReviewPageContent() {
     const response = await fetch("/api/review/focus", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cardId: card.id, action, gaps: evaluation.gaps }) });
     if (!response.ok) { setFeedbackNotice("操作未保存，请重试。"); return; }
     setFeedbackNotice(action === "weak" ? "已加入薄弱复习队列。" : action === "priority" ? "下一次练习会优先出现这张卡。" : "已移出薄弱复习队列。");
-  }, [card, evaluation]);
+  }, [card, evaluation, setFeedbackNotice]);
 
   const createSupplement = () => {
     if (!card || !evaluation) return;
@@ -211,7 +211,7 @@ function ReviewPageContent() {
 
   const startQueue = useCallback((kind: QueueKind) => { void loadSession(kind); }, [loadSession]);
   const loadRandom = useCallback(() => void loadSession("random", seenRandomIds), [loadSession, seenRandomIds]);
-  const leaveSession = useCallback(() => { setSession(null); setCard(null); setEvaluation(null); void loadQueueProgress(); }, [loadQueueProgress]);
+  const leaveSession = useCallback(() => { setSession(null); setCard(null); setEvaluation(null); void loadQueueProgress(); }, [loadQueueProgress, setCard, setEvaluation, setSession]);
 
   const saveCurrentStudyEdits = useCallback(async () => {
     if (!card) return;
@@ -238,7 +238,7 @@ function ReviewPageContent() {
       setStudyError(message);
       return message;
     } finally { setStudyBusy(false); }
-  }, [card, loadSession, revealedStudyPoints.length, saveCurrentStudyEdits, session]);
+  }, [card, loadSession, revealedStudyPoints.length, saveCurrentStudyEdits, session, setStudyBusy, setStudyError]);
 
   const evaluate = useCallback(async (): Promise<string | void> => {
     if (!card || !answer.trim()) return "请先写一段自己的回答，下一步会用同一个提交操作生成报告。";
@@ -249,7 +249,7 @@ function ReviewPageContent() {
       else { const message = "未收到评估结果，请重试。"; setSubmitError(message); return message; }
     } catch { const message = "提交失败，答案已保留。请检查网络后重试。"; setSubmitError(message); return message; }
     finally { setBusy(false); }
-  }, [answer, card, comparisonMode, presentedQuestion, semanticProgress]);
+  }, [answer, card, comparisonMode, presentedQuestion, semanticProgress, setBusy, setEvaluation, setSubmitError]);
 
   const confirm = useCallback(async (rating: RatingName): Promise<string | void> => {
     if (!card || !session || session === "random") return "当前题目无法确认评级。";
@@ -266,7 +266,7 @@ function ReviewPageContent() {
       await loadSession(session);
     } catch { return "评级提交失败，请检查网络后重试。"; }
     finally { setBusy(false); }
-  }, [actOnFeedback, answer, card, comparisonMode, loadSession, presentedQuestion, semanticProgress, session]);
+  }, [actOnFeedback, answer, card, comparisonMode, loadSession, presentedQuestion, semanticProgress, session, setBusy]);
 
   if (!progress && session === null) return <div className="loading">正在准备今天的练习…</div>;
 

@@ -67,18 +67,18 @@ export function CardWorkspace({ initialMode, onClose, onComplete }: CardWorkspac
     workspaceRef.current?.scrollIntoView({ block: "start", behavior });
     window.scrollTo({ top: 0, behavior });
   }, []);
-  const load = useCallback(() => fetch("/api/cards").then((response) => response.json()).then((data) => setCards(data.cards)), []);
+  const load = useCallback(() => fetch("/api/cards").then((response) => response.json()).then((data) => setCards(data.cards)), [setCards]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     const track = lastManualTrack();
     if (track !== "Agent") setDraft((current) => current.question || current.answerPoints.some((item) => item.content) ? current : { ...current, track });
-  }, []);
+  }, [setDraft]);
   useEffect(() => {
     setDraft((current) => {
       const tags = withTrackTag(current.track, splitTags(current.tags)).join(", ");
       return tags === current.tags ? current : { ...current, tags };
     });
-  }, [draft.track]);
+  }, [draft.track, setDraft]);
   useEffect(() => {
     if (!saveFeedback) return;
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -106,7 +106,7 @@ export function CardWorkspace({ initialMode, onClose, onComplete }: CardWorkspac
       setNotice("已根据遗漏要点生成补充卡草稿，请确认后保存。");
     } catch { /* Ignore an old or malformed local draft. */ }
     window.localStorage.removeItem("mock-interview:supplement-draft");
-  }, []);
+  }, [setDraft, setNotice]);
   useEffect(() => {
     const learningChatDraftKey = "mock-interview:learning-chat-card-draft";
     const draftKey = window.localStorage.getItem(learningChatDraftKey) ? learningChatDraftKey : "mock-interview:follow-up-card-draft";
@@ -132,7 +132,7 @@ export function CardWorkspace({ initialMode, onClose, onComplete }: CardWorkspac
       setNotice(draftKey === learningChatDraftKey ? "AI 已根据选中的学习对话生成关联卡草稿；请核对后保存。" : "AI 已生成追问卡草稿，并预选了与原卡的关联关系；请核对后保存。");
     } catch { setNotice("追问卡草稿无效，已保留空白录入表单。请重新生成。 "); }
     window.localStorage.removeItem(draftKey);
-  }, []);
+  }, [setDraft, setMode, setNotice, setSaveFeedback]);
   const resetImport = () => { setFile(null); setSheets([]); setSheetName(""); setMapping(emptyMapping); setPreviewRows([]); setIncluded(new Set()); setDragging(false); };
   const inspectFile = async (selected: File) => { setImportBusy(true); setNotice(""); const form = new FormData(); form.set("file", selected); form.set("phase", "inspect"); const response = await fetch("/api/cards/import/parse", { method: "POST", body: form }); const data = await response.json(); setImportBusy(false); if (!response.ok) { setNotice(data.error ?? "无法读取文件。"); return; } const first = data.sheets[0] as SheetInfo | undefined; setFile(selected); setSheets(data.sheets); setSheetName(first?.name ?? ""); setMapping(first?.mapping ?? emptyMapping); setPreviewRows([]); };
   const previewFile = async () => { if (!file || !sheetName) return; setImportBusy(true); const form = new FormData(); form.set("file", file); form.set("phase", "preview"); form.set("sheetName", sheetName); form.set("mapping", JSON.stringify(mapping)); const response = await fetch("/api/cards/import/parse", { method: "POST", body: form }); const data = await response.json(); setImportBusy(false); if (!response.ok) { setNotice(data.error ?? "无法生成预览。"); return; } setPreviewRows(data.preview); setIncluded(new Set(data.preview.filter((row: ImportPreviewRow) => row.status === "valid").map((row: ImportPreviewRow) => row.id))); if (data.truncated) setNotice("文件超过 500 行，仅显示前 500 行供导入。"); };
@@ -203,7 +203,7 @@ export function CardWorkspace({ initialMode, onClose, onComplete }: CardWorkspac
       return message;
     }
     finally { setSaveBusy(false); }
-  }, [draft, focusFirstMissingRequiredField, load, onComplete, scrollToPageTop]);
+  }, [draft, focusFirstMissingRequiredField, load, onComplete, scrollToPageTop, setDraft, setNotice, setSaveFeedback]);
   const submit = (event: FormEvent) => { event.preventDefault(); void saveCard(); };
   const saveAndCreateRelated = (relationType: CardRelationType) => { void saveCard(relationType); };
   const clearDraft = () => {
