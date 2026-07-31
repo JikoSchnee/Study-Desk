@@ -55,6 +55,7 @@ export function SearchableSelect(props: SingleProps | MultipleProps) {
   const [popoverPosition, setPopoverPosition] = useState<PopoverPosition | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const matches = useMemo(() => matchingOptions(options, query, props.multiple ? props.value : []), [options, props.multiple, props.value, query]);
+  const keepsTypedValueOnEnter = props.multiple && allowCustom;
   const placementIsFixedAbove = menuPlacement === "top";
   const containsSelectNode = (target: EventTarget | null) => target instanceof Node && Boolean(rootRef.current?.contains(target) || popoverRef.current?.contains(target));
 
@@ -191,7 +192,7 @@ export function SearchableSelect(props: SingleProps | MultipleProps) {
     }
     setQuery(value);
     setOpen(true);
-    setActiveIndex(0);
+    setActiveIndex(keepsTypedValueOnEnter ? -1 : 0);
   };
 
   const popoverStyle: CSSProperties = popoverPosition ? { left: popoverPosition.left, width: popoverPosition.width, ...(popoverPosition.bottom === undefined ? { top: popoverPosition.top } : { bottom: popoverPosition.bottom }) } : { visibility: "hidden" };
@@ -199,7 +200,7 @@ export function SearchableSelect(props: SingleProps | MultipleProps) {
 
   return <><div className={`searchable-select ${variant} ${open ? "open" : ""} ${placementIsFixedAbove || opensUpward ? "opens-upward" : ""}`} ref={rootRef}>
     <div className="searchable-select-control" onMouseDown={(event) => { if (!(event.target as HTMLElement).closest("[data-tag-remove], [data-select-toggle]")) inputRef.current?.focus({ preventScroll: true }); }}>
-      <input ref={inputRef} value={query} required={required} aria-label={ariaLabel} aria-autocomplete="list" aria-controls={listboxId} aria-expanded={open} role="combobox" placeholder={values.length && props.multiple ? "继续输入标签" : placeholder} onFocus={() => { setOpen(true); setActiveIndex(0); }} onBlur={(event) => { if (!containsSelectNode(event.relatedTarget)) { commitQuery(); setOpen(false); } }} onCompositionStart={() => { isComposingRef.current = true; }} onCompositionEnd={(event) => { isComposingRef.current = false; setQuery(event.currentTarget.value); setOpen(true); setActiveIndex(0); }} onChange={handleChange} onKeyDown={handleKeyDown} />
+      <input ref={inputRef} value={query} required={required} aria-label={ariaLabel} aria-autocomplete="list" aria-controls={listboxId} aria-expanded={open} role="combobox" placeholder={values.length && props.multiple ? "继续输入标签" : placeholder} onFocus={() => { setOpen(true); setActiveIndex(keepsTypedValueOnEnter && query ? -1 : 0); }} onBlur={(event) => { if (!containsSelectNode(event.relatedTarget)) { commitQuery(); setOpen(false); } }} onCompositionStart={() => { isComposingRef.current = true; }} onCompositionEnd={(event) => { isComposingRef.current = false; setQuery(event.currentTarget.value); setOpen(true); setActiveIndex(keepsTypedValueOnEnter ? -1 : 0); }} onChange={handleChange} onKeyDown={handleKeyDown} />
       {props.multiple && values.map((value) => <span className="searchable-select-chip" key={value}>#{value}<button type="button" data-tag-remove onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); }} onClick={(event) => { event.stopPropagation(); removeValue(value); }} aria-label={`移除标签 ${value}`}><X size={13}/></button></span>)}
       {!props.multiple && props.value && <button type="button" className="searchable-select-clear" onMouseDown={(event) => event.preventDefault()} onClick={clearSingle} aria-label={`清除${ariaLabel}`}><X size={15}/></button>}
       <button type="button" className="searchable-select-toggle" data-select-toggle onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); }} onClick={(event) => { event.stopPropagation(); setOpen((isOpen) => !isOpen); inputRef.current?.focus({ preventScroll: true }); }} aria-label={open ? `收起${ariaLabel}选项` : `展开${ariaLabel}选项`} aria-expanded={open} aria-controls={listboxId}><ChevronDown className="searchable-select-arrow" size={17}/></button>
