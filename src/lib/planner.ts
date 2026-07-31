@@ -28,9 +28,15 @@ export function ensureDailyPlan(date = todayShanghai()) {
     sqlite.prepare("INSERT INTO daily_tasks (id, plan_date, kind, title, card_id, estimate_minutes, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'todo', ?)")
       .run(randomUUID(), date, kind, title, cardId, estimate, now);
   };
-  const dueRows = sqlite.prepare("SELECT c.id, c.question FROM cards c JOIN review_state r ON r.card_id = c.id WHERE c.status = 'review' AND r.due_at <= ? ORDER BY r.due_at ASC, c.id ASC LIMIT ?").all(now, preference.dailyReviewTarget) as Array<{ id: string; question: string }>;
+  // A dashboard refresh calls this function again. Only fill the remaining
+  // slots, otherwise every refresh would append another full daily target.
+  const scheduledReviewCount = existingTasks.filter((task) => task.kind === "review").length;
+  const scheduledLearningCount = existingTasks.filter((task) => task.kind === "learn").length;
+  const remainingReviewSlots = Math.max(0, preference.dailyReviewTarget - scheduledReviewCount);
+  const remainingLearningSlots = Math.max(0, preference.dailyInitialTarget - scheduledLearningCount);
+  const dueRows = sqlite.prepare("SELECT c.id, c.question FROM cards c JOIN review_state r ON r.card_id = c.id WHERE c.status = 'review' AND r.due_at <= ? ORDER BY r.due_at ASC, c.id ASC LIMIT ?").all(now, remainingReviewSlots) as Array<{ id: string; question: string }>;
   for (const card of dueRows) if (!assignedCards.has(card.id)) { insertTask("review", `复习：${card.question}`, card.id, 3); assignedCards.add(card.id); }
-  const learning = listCards().filter((card) => card.status === "learning" && !assignedCards.has(card.id)).slice(0, preference.dailyInitialTarget);
+  const learning = listCards().filter((card) => card.status === "learning" && !assignedCards.has(card.id)).slice(0, remainingLearningSlots);
   for (const card of learning) { insertTask("learn", `学习：${card.question}`, card.id, 5); assignedCards.add(card.id); }
   return listDailyTasks(date);
 }
