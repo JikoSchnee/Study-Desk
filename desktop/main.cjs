@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, utilityProcess } = require("electron");
+const { app, BrowserWindow, ipcMain, powerMonitor, utilityProcess } = require("electron");
 const { existsSync } = require("node:fs");
 const http = require("node:http");
 const https = require("node:https");
@@ -8,6 +8,8 @@ const path = require("node:path");
 let mainWindow;
 let serverProcess;
 let serverPort;
+let isQuitting = false;
+let isRestartingServer = false;
 
 function userHome() { return path.join(app.getPath("userData"), "runtime"); }
 function sendMaximizeState() { mainWindow?.webContents.send("window:maximize-change", mainWindow?.isMaximized() ?? false); }
@@ -66,8 +68,20 @@ function waitForServer(port) {
   });
 }
 
-async function startServer() {
-  serverPort = await findPort();
+function isServerAvailable(port) {
+  return new Promise((resolve) => {
+    if (!port) return resolve(false);
+    const request = http.get(`http://127.0.0.1:${port}/api/cards?limit=1`, (response) => {
+      response.resume();
+      resolve(Boolean(response.statusCode && response.statusCode < 500));
+    });
+    request.once("error", () => resolve(false));
+    request.setTimeout(1_500, () => { request.destroy(); resolve(false); });
+  });
+}
+
+async function startServer(port = null) {
+  serverPort = port ?? await findPort();
   const serverPath = app.isPackaged
     ? path.join(process.resourcesPath, "next", "server.js")
     : path.join(app.getAppPath(), ".next", "standalone", "server.js");
@@ -78,8 +92,38 @@ async function startServer() {
     serviceName: "Study Desk Server",
   });
   serverProcess.stderr?.on("data", (message) => console.error(`[next] ${message}`));
-  serverProcess.once("exit", (code) => { if (code && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("desktop:server-error", "本地服务意外退出。"); });
+  serverProcess.once("exit", (code, signal) => {
+    if (isQuitting) return;
+    console.error(`[next] local server exited unexpectedly (code: ${code ?? "none"}, signal: ${signal ?? "none"}).`);
+    void restartServer();
+  });
   await waitForServer(serverPort);
+}
+
+async function restartServer() {
+  if (isRestartingServer || isQuitting) return;
+  isRestartingServer = true;
+  const port = serverPort;
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("desktop:server-error", "本地服务已中断，正在自动恢复。");
+  try {
+    // Keep the original port so the loaded page, its draft, and its relative API
+    // requests remain valid after recovery.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await startServer(port);
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("desktop:server-recovered");
+  } catch (error) {
+    console.error("[next] failed to restart local server", error);
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("desktop:server-error", "本地服务恢复失败，请重启应用后再试。");
+  } finally {
+    isRestartingServer = false;
+  }
+}
+
+async function ensureServerAfterWake() {
+  if (isQuitting || isRestartingServer || await isServerAvailable(serverPort)) return;
+  console.error("[next] local server is unavailable after wake; restarting it.");
+  serverProcess?.kill();
+  await restartServer();
 }
 
 function createWindow() {
@@ -137,5 +181,6 @@ app.whenReady().then(async () => {
   catch (error) { console.error(error); app.quit(); }
 });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
-app.on("before-quit", () => { serverProcess?.kill(); });
+app.on("before-quit", () => { isQuitting = true; serverProcess?.kill(); });
 app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0 && serverPort) createWindow(); });
+powerMonitor.on("resume", () => { void ensureServerAfterWake(); });
