@@ -64,8 +64,14 @@ export default function ReviewPage() {
   const [studyError, setStudyError] = usePageState("review:study-error", "");
   const [studyEditMode, setStudyEditMode] = usePageState<Record<string, "note" | "hint">>("review:point-edit-mode", {});
   const [studyEditErrors, setStudyEditErrors] = usePageState<Record<string, string>>("review:point-edit-errors", {});
+  const [learningChatOpen, setLearningChatOpen] = usePageState<boolean | null>("review:learning-chat-open", null);
   const studySaveTimers = useRef<Record<string, number>>({});
+  const reviewCardRef = useRef<HTMLElement | null>(null);
+  const learningChatRef = useRef<HTMLElement | null>(null);
+  const learningChatAnimationTimer = useRef<number | null>(null);
   const semanticProgress = useSemanticComparisonProgress();
+
+  useEffect(() => () => { if (learningChatAnimationTimer.current !== null) window.clearTimeout(learningChatAnimationTimer.current); }, []);
 
   const loadQueueProgress = useCallback(async () => {
     const response = await fetch("/api/review/queue");
@@ -291,6 +297,34 @@ export default function ReviewPage() {
   };
   const stats = !isRandom ? progress?.[queue] : null;
   const sessionCopy = !isRandom ? queueCopy[queue] : null;
+  const chatOpen = learningChatOpen ?? isInitial;
+  const setChatOpenWithFlip = (nextOpen: boolean) => {
+    const cardElement = reviewCardRef.current;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const mobile = window.matchMedia("(max-width: 800px)").matches;
+    if (!cardElement || reducedMotion || mobile) { setLearningChatOpen(nextOpen); return; }
+    const first = cardElement.getBoundingClientRect();
+    if (learningChatAnimationTimer.current !== null) window.clearTimeout(learningChatAnimationTimer.current);
+    setLearningChatOpen(nextOpen);
+    window.requestAnimationFrame(() => {
+      const last = cardElement.getBoundingClientRect();
+      cardElement.style.transformOrigin = "top left";
+      cardElement.style.willChange = "transform";
+      cardElement.style.transition = "none";
+      cardElement.style.transform = `translate(${first.left - last.left}px, ${first.top - last.top}px) scale(${first.width / Math.max(last.width, 1)}, ${first.height / Math.max(last.height, 1)})`;
+      void cardElement.getBoundingClientRect();
+      window.requestAnimationFrame(() => {
+        cardElement.style.transition = "transform 210ms cubic-bezier(.22, .8, .28, 1)";
+        cardElement.style.transform = "";
+        learningChatAnimationTimer.current = window.setTimeout(() => {
+          cardElement.style.transition = "";
+          cardElement.style.transformOrigin = "";
+          cardElement.style.willChange = "";
+          learningChatAnimationTimer.current = null;
+        }, 230);
+      });
+    });
+  };
 
   const allStudyPointsRevealed = revealedStudyPoints.length === activeCard.answerPoints.length;
   const studyPointLabels = answerPointLabels(activeCard.answerPoints);
@@ -316,7 +350,7 @@ export default function ReviewPage() {
     <SemanticComparisonProgress open={semanticProgress.open} progress={semanticProgress.progress}/>
     <PageHeader eyebrow={<><BrainCircuit size={15}/> {isRandom ? "随机练习" : sessionCopy?.label}</>} title={isRandom ? "随机抽一题，说说看。" : isInitial ? "先看懂，再进入回忆。" : queue === "weak" ? "把难点练扎实。" : "把记忆再叫回来。"} description={isRandom ? "这次练习只提供反馈，不会影响复习排程。" : isInitial ? "这不是考试：逐条看完答案要点后，明天再进行第一次主动回忆。" : queue === "weak" ? "薄弱复习不改变排程，练好后可以把它移出队列。" : "说不完整没关系，关键是把思路调出来。"} tour="review" actions={<>{isRandom ? <Chip tone="blue">随机练习</Chip> : stats && <Chip tone={isInitial ? "green" : "blue"}>{progressText(stats)}</Chip>}<Button variant="secondary" onClick={isRandom ? loadRandom : leaveSession}>{isRandom ? <><Dices size={17}/> 再抽一题</> : "切换练习"}</Button></>} />
     <div className="review-learning-layout page-focus-content">
-    <article className="review-card">
+    <article ref={reviewCardRef} className="review-card">
       <div><div className="review-question-heading"><p className="eyebrow">问题</p>{isInitial ? <Chip tone="green">首次学习</Chip> : difficulty && <span className={`difficulty-badge difficulty-${difficulty.className}`} title={`FSRS 难度 ${learning?.fsrsDifficulty?.toFixed(1)} / 10`}>难度 {difficulty.label}<small>{learning?.fsrsDifficulty?.toFixed(1)}</small></span>}</div><h2 className="review-question">{presentedQuestion}</h2></div>
       {isInitial ? <section className="initial-study-flow" data-tour="initial-study-flow" aria-label="首次学习步骤">
         <div className="initial-study-intro"><div className="initial-study-orb"><GraduationCap size={24}/></div><div><p className="eyebrow">先理解，再回忆</p><h3>沿着提示，逐条看懂答案。</h3><p>每个要点先给出一个线索；点击后查看完整解释。不会评分，也不会记录为作答。</p></div></div>
@@ -337,7 +371,7 @@ export default function ReviewPage() {
         <div className="form-actions review-answer-actions"><small className="shortcut-hint">⌘/Ctrl + Enter 提交 · H 提示</small><div className="review-answer-buttons">{hints.length ? <Button type="button" variant="ghost" className="hint-button" onClick={() => setActiveHint((current) => current === null ? 0 : null)}><Lightbulb size={17}/>{activeHint === null ? "需要提示" : "收起提示"}</Button> : <p className="hint-unavailable"><Lightbulb size={16}/> 此卡暂未设置提示</p>}<SpeechRecorder onTranscript={(value) => setAnswer((old) => `${old}${old ? "\n" : ""}${value}`)} /><Button disabled={!answer.trim() || busy} onClick={evaluate}>{busy ? "正在准备比对…" : "提交回答"}</Button></div>{submitError && <span className="danger" role="alert">{submitError} <button type="button" onClick={() => void evaluate()}>重试</button></span>}</div>
       </div> : isRandom ? <div className="random-feedback"><div className="feedback"><strong>{evaluation.score} 分 · 随机练习反馈</strong><p>{evaluation.feedback}</p>{evaluation.gaps.length > 0 && <p>待补充：{evaluation.gaps.join("、")}</p>}</div><AnswerComparisonView comparison={evaluation.comparison} answer={answer}/><MoreQuestions/><details className="feedback-actions"><summary>可选：把遗漏要点变成后续训练</summary><div className="feedback-actions-content"><Button variant="ghost" disabled={!llmConfigured || followUpBusy || Boolean(followUpQuestion)} onClick={generateFollowUp}><Sparkles size={16}/> {followUpBusy ? "正在生成追问…" : followUpQuestion ? "已生成追问" : "AI 拓展追问"}</Button>{feedbackNotice && <span className="muted-copy" role="status">{feedbackNotice}</span>}</div>{followUpQuestion && <section className="follow-up-card"><p className="eyebrow"><Sparkles size={15}/> AI 拓展追问</p><h3>{followUpQuestion}</h3><Button variant="secondary" disabled={followUpBusy || followUpDraftBusy} onClick={addFollowUpToLibrary}><BookOpenCheck size={16}/>{followUpDraftBusy ? "正在生成卡片草稿…" : "加入卡片库"}</Button>{!followUpFeedback ? <><textarea className="answer compact-answer" value={followUpAnswer} onChange={(event) => setFollowUpAnswer(event.target.value)} placeholder="回答这条追问；不会改变本卡的 FSRS 排程。" /><Button disabled={!followUpAnswer.trim() || followUpBusy} onClick={evaluateFollowUp}>{followUpBusy ? "正在评估…" : "提交追问回答"}</Button></> : <div className="feedback"><strong>{followUpFeedback.score} 分 · 追问反馈</strong><p>{followUpFeedback.feedback}</p>{followUpFeedback.gaps.length > 0 && <p>待补充：{followUpFeedback.gaps.join("、")}</p>}</div>}</section>}</details><Button variant="secondary" onClick={loadRandom}><Dices size={17}/> 再抽一题</Button></div> : <div className="stack"><section className="stack" data-tour="review-report"><div className="feedback"><strong>{evaluation.score} 分 · 建议：{evaluation.suggestedRating}</strong><p>{evaluation.feedback}</p>{evaluation.gaps.length > 0 && <p>待补充：{evaluation.gaps.join("、")}</p>}</div><AnswerComparisonView comparison={evaluation.comparison} answer={answer}/><MoreQuestions/></section><section className="review-rating-section" data-tour="review-rating"><div className="review-rating-heading"><div><p className="eyebrow">下一步：安排复习</p><h3>这次记得怎么样？</h3><p>选择后更新下一次复习计划。</p></div><span className="rating-shortcuts">快捷键 1–4</span></div><div className="rating-row"><Button className="again rating-choice" disabled={busy} onClick={() => confirm("again")}><span className="rating-key">1</span><strong>忘记</strong><small>重新练习</small></Button><Button className="hard rating-choice" disabled={busy} onClick={() => confirm("hard")}><span className="rating-key">2</span><strong>困难</strong><small>更快复习</small></Button><Button className="good rating-choice" disabled={busy} onClick={() => confirm("good")}><span className="rating-key">3</span><strong>良好</strong><small>按计划复习</small></Button><Button className="easy rating-choice" disabled={busy} onClick={() => confirm("easy")}><span className="rating-key">4</span><strong>轻松</strong><small>更长间隔</small></Button></div></section><details className="feedback-actions"><summary>可选：把遗漏要点变成后续训练</summary><div className="feedback-actions-content"><Button variant="secondary" onClick={() => actOnFeedback("weak")}>加入薄弱复习</Button><Button variant="outline" onClick={() => actOnFeedback("priority")}>下次优先练习</Button><Button variant="ghost" onClick={createSupplement}>生成补充卡</Button><Button variant="ghost" disabled={!llmConfigured || followUpBusy || Boolean(followUpQuestion)} onClick={generateFollowUp}><Sparkles size={16}/> {followUpBusy ? "正在生成追问…" : followUpQuestion ? "已生成追问" : "AI 拓展追问"}</Button>{queue === "weak" && <Button variant="ghost" onClick={() => actOnFeedback("removeWeak")}>移出薄弱队列</Button>}{feedbackNotice && <span className="muted-copy" role="status">{feedbackNotice}</span>}</div>{followUpQuestion && <section className="follow-up-card"><p className="eyebrow"><Sparkles size={15}/> AI 拓展追问</p><h3>{followUpQuestion}</h3><Button variant="secondary" disabled={followUpBusy || followUpDraftBusy} onClick={addFollowUpToLibrary}><BookOpenCheck size={16}/>{followUpDraftBusy ? "正在生成卡片草稿…" : "加入卡片库"}</Button>{!followUpFeedback ? <><textarea className="answer compact-answer" value={followUpAnswer} onChange={(event) => setFollowUpAnswer(event.target.value)} placeholder="回答这条追问；不会改变本卡的 FSRS 排程。" /><Button disabled={!followUpAnswer.trim() || followUpBusy} onClick={evaluateFollowUp}>{followUpBusy ? "正在评估…" : "提交追问回答"}</Button></> : <div className="feedback"><strong>{followUpFeedback.score} 分 · 追问反馈</strong><p>{followUpFeedback.feedback}</p>{followUpFeedback.gaps.length > 0 && <p>待补充：{followUpFeedback.gaps.join("、")}</p>}</div>}</section>}</details></div>}
     </article>
-    <ReviewLearningChat card={activeCard} llmConfigured={llmConfigured} defaultOpen={isInitial} />
+    <ReviewLearningChat card={activeCard} llmConfigured={llmConfigured} open={chatOpen} onOpenChange={setChatOpenWithFlip} panelRef={learningChatRef} />
     </div>
   </PageLayout>;
 }

@@ -56,6 +56,27 @@ async function requestModel(config: RemoteModelConfig, input: { system: string; 
   return content;
 }
 
+async function requestModelStream(config: RemoteModelConfig, input: { system: string; user: string; temperature: number }) {
+  if (config.protocol === "anthropic-messages") {
+    const response = await fetch(`${config.baseUrl}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream", "x-api-key": config.apiKey, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model: config.model, max_tokens: 1_200, temperature: input.temperature, system: input.system, stream: true, messages: [{ role: "user", content: input.user }] }),
+    });
+    if (!response.ok) throw new Error(`模型服务返回 ${response.status}`);
+    if (!response.body) throw new Error("模型服务没有返回流式内容");
+    return { body: response.body, protocol: config.protocol };
+  }
+  const response = await fetch(`${config.baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "text/event-stream", Authorization: `Bearer ${config.apiKey}` },
+    body: JSON.stringify({ model: config.model, temperature: input.temperature, stream: true, messages: [{ role: "system", content: input.system }, { role: "user", content: input.user }] }),
+  });
+  if (!response.ok) throw new Error(`模型服务返回 ${response.status}`);
+  if (!response.body) throw new Error("模型服务没有返回流式内容");
+  return { body: response.body, protocol: config.protocol };
+}
+
 export const localLLMProvider: LLMProvider = {
   async evaluateAnswer(card, answer) {
     const comparison = await compareWithEmbeddings(card, answer);
@@ -145,6 +166,15 @@ type FollowUpCardContext = { answer?: string; gaps?: string[] };
 type GeneratedAnswerPoint = { content?: unknown; hint?: unknown; note?: unknown; role?: unknown };
 export type LearningChatMessage = { role: "user" | "assistant"; content: string; cardId: string; question: string };
 
+function learningChatInput(card: Card, history: LearningChatMessage[], message: string) {
+  const recentHistory = history.slice(-16).map((item) => `${item.role === "user" ? "学习者" : "助手"}（题目：${item.question}）：${item.content}`).join("\n");
+  return {
+    temperature: 0.35,
+    system: "你是耐心、严谨的中文技术学习助手。围绕当前卡片答疑，优先解释概念、推导和易错点；答案准确、结构清晰、适合面试复习。不要假装知道卡片以外的个人背景；信息不足时明确说明。不要给分或代替用户完成复习作答。",
+    user: `当前卡片问题：${card.question}\n当前卡片其他问法：${card.questionVariants.map((item) => item.content).join("；") || "无"}\n当前卡片答案要点：${card.answerPoints.map((item) => item.content).join("；")}\n知识库类型：${card.track}\n标签：${card.tags.join("、") || "无"}\n\n本次学习会话：\n${recentHistory || "（这是第一轮对话）"}\n\n学习者本次提问：${message.trim()}`,
+  };
+}
+
 function relationTypeFromSource(value: unknown): CardRelationType {
   if (value === "source_parent") return "child";
   if (value === "source_child") return "parent";
@@ -208,16 +238,51 @@ export async function generateFollowUpCardDraft(card: Card, followUpQuestion: st
 export async function generateLearningChatResponse(card: Card, history: LearningChatMessage[], message: string) {
   const config = remoteModelConfig();
   if (!config) throw new Error("请先在设置中配置模型服务，再使用学习助手。");
-  const recentHistory = history.slice(-16).map((item) => `${item.role === "user" ? "学习者" : "助手"}（题目：${item.question}）：${item.content}`).join("\n");
   try {
-    return await requestModel(config, {
-      temperature: 0.35,
-      system: "你是耐心、严谨的中文技术学习助手。围绕当前卡片答疑，优先解释概念、推导和易错点；答案准确、结构清晰、适合面试复习。不要假装知道卡片以外的个人背景；信息不足时明确说明。不要给分或代替用户完成复习作答。",
-      user: `当前卡片问题：${card.question}\n当前卡片其他问法：${card.questionVariants.map((item) => item.content).join("；") || "无"}\n当前卡片答案要点：${card.answerPoints.map((item) => item.content).join("；")}\n知识库类型：${card.track}\n标签：${card.tags.join("、") || "无"}\n\n本次学习会话：\n${recentHistory || "（这是第一轮对话）"}\n\n学习者本次提问：${message.trim()}`,
-    });
+    return await requestModel(config, learningChatInput(card, history, message));
   } catch (error) {
     throw new Error(error instanceof Error ? error.message : "学习助手暂时无法回答。");
   }
+}
+
+export async function streamLearningChatResponse(card: Card, history: LearningChatMessage[], message: string) {
+  const config = remoteModelConfig();
+  if (!config) throw new Error("请先在设置中配置模型服务，再使用学习助手。");
+  const upstream = await requestModelStream(config, learningChatInput(card, history, message));
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const reader = upstream.body.getReader();
+      let buffer = "";
+      const emit = (line: string) => {
+        if (!line.startsWith("data:")) return;
+        const payload = line.slice(5).trim();
+        if (!payload || payload === "[DONE]") return;
+        try {
+          const data = JSON.parse(payload) as { choices?: Array<{ delta?: { content?: unknown } }>; type?: string; delta?: { type?: string; text?: unknown } };
+          const text = upstream.protocol === "anthropic-messages"
+            ? data.type === "content_block_delta" && data.delta?.type === "text_delta" && typeof data.delta.text === "string" ? data.delta.text : ""
+            : typeof data.choices?.[0]?.delta?.content === "string" ? data.choices[0].delta.content : "";
+          if (text) controller.enqueue(encoder.encode(text));
+        } catch { /* Ignore provider keep-alives and malformed intermediary events. */ }
+      };
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const line of lines) emit(line.trim());
+          if (done) break;
+        }
+        if (buffer.trim()) emit(buffer.trim());
+        controller.close();
+      } catch (error) { controller.error(error); }
+      finally { reader.releaseLock(); }
+    },
+    cancel() { void upstream.body.cancel(); },
+  });
 }
 
 export function parseGeneratedLearningChatCardDraft(content: string, card: Card): FollowUpCardDraft {
