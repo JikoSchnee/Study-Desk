@@ -19,6 +19,7 @@ import { TourButton } from "@/components/tour";
 import { usePageState, usePageStateCache } from "@/components/page-state-cache";
 import { difficultyTier, type CardSort, type SortDirection } from "@/lib/card-filters";
 import { rarityPreset, stabilityRarityTier, type StabilityRarityPreset } from "@/lib/card-tiers";
+import { fetchJson, LocalApiError } from "@/lib/client-api";
 import { answerPointsToNumberedText, splitTags } from "@/lib/import";
 import { withTrackTag } from "@/lib/utils";
 import type { AnswerPoint, Card, CardLearningDetails, CardLearningSummary, CardRelation, CardRelationType, QuestionVariant, Tag as TagItem, TagDisplayLanguage } from "@/lib/types";
@@ -29,28 +30,7 @@ type WorkspaceMode = "manual" | "import";
 type BulkEditMode = "tags" | "track";
 const defaultKnowledgeBaseTypes = ["Agent", "Java 后端", "计算机基础"];
 const cardsPageSize = 20;
-const localRequestTimeoutMs = 10_000;
 type CardPage = { cards: Card[]; learning: Record<string, CardLearningSummary>; total: number; hasMore: boolean; facets: { tracks: string[]; tags: string[] } };
-
-async function fetchJsonWithTimeout<T>(input: RequestInfo | URL, init: RequestInit = {}, label = "本地服务") {
-  const controller = new AbortController();
-  let timedOut = false;
-  const abort = () => controller.abort();
-  init.signal?.addEventListener("abort", abort, { once: true });
-  const timeout = window.setTimeout(() => { timedOut = true; controller.abort(); }, localRequestTimeoutMs);
-  try {
-    const response = await fetch(input, { ...init, signal: controller.signal });
-    const data = await response.json() as T;
-    if (!response.ok) throw new Error((data as { error?: string }).error ?? `${label}返回了 HTTP ${response.status}。`);
-    return data;
-  } catch (error) {
-    if (timedOut) throw new Error(`${label}在 10 秒内未响应，请确认桌面应用仍在运行后重试。`);
-    throw error;
-  } finally {
-    window.clearTimeout(timeout);
-    init.signal?.removeEventListener("abort", abort);
-  }
-}
 
 function compactReviewTime(value: string | null | undefined, future = false) {
   if (!value) return future ? "待首次作答" : "尚未练习";
@@ -111,11 +91,13 @@ function useCardRecommendationPreload() {
     const requestController = new AbortController();
     controller.current = requestController;
     inFlight.current = true;
-    void fetch("/api/cards/recommendations/preload", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cardIds }), signal: requestController.signal })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Unable to preload recommendations.");
-        return response.json() as Promise<{ recommendations?: Record<string, CardRecommendationResult> }>;
-      })
+    void fetchJson<{ recommendations?: Record<string, CardRecommendationResult> }>("/api/cards/recommendations/preload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cardIds }),
+      signal: requestController.signal,
+      label: "预加载卡片建议",
+    })
       .then((data) => {
         if (generation.current !== currentGeneration) return;
         const next = data.recommendations ?? {};
@@ -257,7 +239,7 @@ export function CardLibrary() {
     const params = new URLSearchParams({ offset: String(offset), limit: String(cardsPageSize), query, track: selectedTrack, sort, direction: sortDirection, archived: String(showArchived) });
     for (const tag of selectedTags) params.append("tag", tag);
     try {
-      const data = await fetchJsonWithTimeout<CardPage>(`/api/cards?${params}`, { signal: controller.signal }, "藏品");
+      const data = await fetchJson<CardPage>(`/api/cards?${params}`, { signal: controller.signal, label: "读取藏品" });
       if (generation !== cardsRequestGeneration.current) return;
       setCards((current) => replace ? data.cards : [...current, ...data.cards.filter((card) => !current.some((existing) => existing.id === card.id))]);
       setLearningByCardId((current) => replace ? data.learning : { ...current, ...data.learning });
@@ -277,8 +259,8 @@ export function CardLibrary() {
   }, [query, selectedTrack, selectedTags, showArchived, sort, sortDirection]);
   const load = useCallback(async () => {
     const [settingsResult, tagsResult] = await Promise.allSettled([
-      fetchJsonWithTimeout<{ stabilityRarityPreset?: string; tagDisplayLanguage?: string }>("/api/settings", {}, "设置服务"),
-      fetchJsonWithTimeout<{ tags?: TagItem[] }>("/api/tags", {}, "标签服务"),
+      fetchJson<{ stabilityRarityPreset?: string; tagDisplayLanguage?: string }>("/api/settings", { label: "读取设置" }),
+      fetchJson<{ tags?: TagItem[] }>("/api/tags", { label: "读取标签" }),
     ]);
     if (settingsResult.status === "fulfilled") {
       const settings = settingsResult.value;
@@ -417,9 +399,7 @@ export function CardLibrary() {
   const openCardDetails = async (card: Card) => {
     setDetailLoading(card.id); setNotice("");
     try {
-      const response = await fetch(`/api/cards/${card.id}/details`);
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? "无法读取卡片详情。");
+      const data = await fetchJson<{ card: Card; relatedCards?: Array<Card & { relationType: CardRelationType }>; learning: CardLearningDetails }>(`/api/cards/${card.id}/details`, { label: "读取卡片详情" });
       setDetail({ card: data.card, relatedCards: data.relatedCards ?? [], learning: data.learning });
     } catch (error) { setNotice(error instanceof Error ? error.message : "无法读取卡片详情。"); }
     finally { setDetailLoading(null); }
@@ -431,29 +411,24 @@ export function CardLibrary() {
     setEditorSaveState("idle");
     setEditorSaveError("");
     setNotice("");
-    void fetch("/api/cards/options").then(async (response) => {
-      if (!response.ok) throw new Error("无法读取关联卡片。");
-      return response.json() as Promise<{ cards: Card[] }>;
-    }).then((data) => setRelationCards(data.cards)).catch(() => setRelationCards(cards));
+    void fetchJson<{ cards: Card[] }>("/api/cards/options", { label: "读取关联卡片" }).then((data) => setRelationCards(data.cards)).catch(() => setRelationCards(cards));
   };
   useEffect(() => {
     if (!editCardId || editingCard?.id === editCardId) return;
     const loaded = cards.find((card) => card.id === editCardId);
     if (loaded) { openCardEditor(loaded); return; }
-    void fetch(`/api/cards/${editCardId}/details`).then(async (response) => {
-      if (!response.ok) throw new Error("无法读取卡片。");
-      return response.json() as Promise<{ card: Card }>;
-    }).then((data) => openCardEditor(data.card)).catch(() => setNotice("无法打开这张卡片的编辑窗口。"));
+    void fetchJson<{ card: Card }>(`/api/cards/${editCardId}/details`, { label: "读取卡片" }).then((data) => openCardEditor(data.card)).catch(() => setNotice("无法打开这张卡片的编辑窗口。"));
   }, [cards, editCardId, editingCard?.id]);
   const generateVariants = async (question: string, answerPoints: AnswerPoint[], existing: QuestionVariant[]) => {
     if (question.trim().length < 3 || !answerPoints.some((item) => item.content.trim())) { setNotice("请先填写主问题和至少一条答案要点，再让 AI 补充问法。"); return; }
     setAiBusy(true); setNotice("");
     try {
-      const response = await fetch("/api/cards/question-variants", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question, answerPoints: answerPoints.map((item) => item.content.trim()).filter(Boolean), existingQuestions: [...existing.map((item) => item.content), ...aiCandidates.map((item) => item.content)] }) });
-      const data = await response.json();
-      if (!response.ok) { if (data.requiresConfiguration) setNeedsLLMConfiguration(true); throw new Error(data.error ?? "暂时无法生成问法。"); }
+      const data = await fetchJson<{ candidates: QuestionVariant[] }>("/api/cards/question-variants", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question, answerPoints: answerPoints.map((item) => item.content.trim()).filter(Boolean), existingQuestions: [...existing.map((item) => item.content), ...aiCandidates.map((item) => item.content)] }), label: "生成补充问法" });
       setAiCandidates((items) => [...items, ...data.candidates]);
-    } catch (error) { setNotice(error instanceof Error ? error.message : "暂时无法生成问法。"); }
+    } catch (error) {
+      if (error instanceof LocalApiError && (error.data as { requiresConfiguration?: unknown } | undefined)?.requiresConfiguration) setNeedsLLMConfiguration(true);
+      setNotice(error instanceof Error ? error.message : "暂时无法生成问法。");
+    }
     finally { setAiBusy(false); }
   };
   const saveCardEditor = async (event: FormEvent) => {
@@ -462,9 +437,7 @@ export function CardLibrary() {
     setEditBusy(true); setEditorSaveState("saving"); setEditorSaveError("");
     let saved = false;
     try {
-      const response = await fetch("/api/cards", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: editingCard.id, ...editingDraft, track: editingDraft.track.trim(), tags: splitTags(editingDraft.tags) }) });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? "无法保存卡片。");
+      const data = await fetchJson<{ card: Card }>("/api/cards", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: editingCard.id, ...editingDraft, track: editingDraft.track.trim(), tags: splitTags(editingDraft.tags) }), label: "保存卡片" });
       // The mutation response is authoritative.  Render the confirmation immediately
       // instead of making its visibility depend on a second, unrelated GET request.
       recommendationPreload.clear();
@@ -494,12 +467,7 @@ export function CardLibrary() {
     if (!ids.length) return "请先选择至少一张卡片。";
     if (action === "delete" && !window.confirm(`永久删除 ${ids.length} 张卡片及其学习记录？此操作无法撤销。`)) return "";
     try {
-      const response = await fetch("/api/cards/bulk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, ids, value }) });
-      const body = await response.text();
-      let data: { error?: string };
-      try { data = JSON.parse(body) as { error?: string }; }
-      catch { throw new Error(`本地服务返回了无法识别的数据（HTTP ${response.status}）。`); }
-      if (!response.ok) throw new Error(data.error ?? "批量操作失败。");
+      await fetchJson<{ ok?: boolean }>("/api/cards/bulk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, ids, value }), label: "批量更新藏品" });
       recommendationPreload.clear(); setSelectedIds(new Set()); setNotice(action === "delete" ? "已永久删除所选卡片和关联记录。" : "已更新所选卡片。"); await load();
       return null;
     } catch (error) {

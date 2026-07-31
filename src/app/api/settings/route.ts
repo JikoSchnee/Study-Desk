@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { isNativeAddonError, localApiErrorResponse } from "@/lib/local-api-error";
 
 export async function GET() {
   try {
     const [{ getEnvironmentSettings }, { getAppSettings }] = await Promise.all([import("@/lib/environment"), import("@/lib/settings")]);
     return NextResponse.json({ ...getAppSettings(), llmConfigured: getEnvironmentSettings().apiKeyConfigured });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "无法读取设置。" }, { status: 500 });
+    return localApiErrorResponse("Failed to read settings", error, "无法读取设置。");
   }
 }
 export async function PUT(request: Request) {
@@ -22,6 +23,7 @@ export async function PUT(request: Request) {
     const { saveAppSettings } = await import("@/lib/settings");
     return NextResponse.json(saveAppSettings(input));
   } catch (error) {
+    if (isNativeAddonError(error)) return localApiErrorResponse("Failed to save settings", error, "无法保存设置。");
     return NextResponse.json({ error: error instanceof Error ? error.message : "无法保存设置。" }, { status: 400 });
   }
 }
@@ -36,6 +38,7 @@ export async function PATCH(request: Request) {
     }
     return NextResponse.json({ ...getAppSettings(), embeddingModelSource });
   } catch (error) {
+    if (isNativeAddonError(error)) return localApiErrorResponse("Failed to save the embedding model source", error, "无法保存模型方案。");
     return NextResponse.json({ error: error instanceof Error ? error.message : "无法保存模型方案。" }, { status: 400 });
   }
 }

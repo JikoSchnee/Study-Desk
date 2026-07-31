@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { localApiErrorResponse } from "@/lib/local-api-error";
 import { todayShanghai } from "@/lib/utils";
 
 export async function GET() {
@@ -11,7 +12,6 @@ export async function GET() {
     const reviewCounts = dashboardReviewCounts();
     return NextResponse.json({ date: todayShanghai(), tasks, totals: { dueReview: reviewCounts.dueNow, reviewedToday: reviewCounts.reviewedToday, completed: tasks.filter((task) => task.status === "done").length } });
   } catch (error) {
-    console.error("Failed to load dashboard", error);
-    return NextResponse.json({ error: error instanceof Error ? error.message : "无法读取今日计划。" }, { status: 500 });
+    return localApiErrorResponse("Failed to load dashboard", error, "无法读取今日计划。");
   }
 }

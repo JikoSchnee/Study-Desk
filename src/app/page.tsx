@@ -7,6 +7,7 @@ import { HomeTutorialDialog } from "@/components/home-tutorial-dialog";
 import { TrainingCalendar } from "@/components/training-calendar";
 import { Button, Panel } from "@/components/ui";
 import { TourButton } from "@/components/tour";
+import { fetchJson } from "@/lib/client-api";
 import type { DailyTask } from "@/lib/types";
 
 type DashboardData = {
@@ -14,21 +15,6 @@ type DashboardData = {
   tasks: DailyTask[];
   totals: { dueReview: number; reviewedToday: number; completed: number };
 };
-
-async function readDashboardResponse(response: Response) {
-  const body = await response.text();
-  let result: Partial<DashboardData> & { error?: string };
-  try {
-    result = JSON.parse(body) as Partial<DashboardData> & { error?: string };
-  } catch {
-    const detail = response.headers.get("content-type")?.includes("text/html")
-      ? "本地服务返回了错误页面。"
-      : "本地服务返回了无法识别的数据。";
-    throw new Error(`读取今日计划失败（HTTP ${response.status}）：${detail}`);
-  }
-  if (!response.ok) throw new Error(result.error ?? `读取今日计划失败（HTTP ${response.status}）。`);
-  return result;
-}
 
 function TutorialLauncher({ onLaunch }: { onLaunch: () => void }) {
   const frame = useRef<number | null>(null);
@@ -87,19 +73,15 @@ export default function TodayPage() {
   const [loadError, setLoadError] = useState("");
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const load = useCallback(async () => {
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 15_000);
     setLoading(true);
     setLoadError("");
     try {
-      const response = await fetch("/api/dashboard", { cache: "no-store", signal: controller.signal });
-      const result = await readDashboardResponse(response);
+      const result = await fetchJson<Partial<DashboardData>>("/api/dashboard", { cache: "no-store", timeoutMs: 15_000, label: "读取今日计划" });
       if (!Array.isArray(result.tasks) || !result.totals) throw new Error("今日计划返回的数据不完整。");
       setData(result as DashboardData);
     } catch (error) {
-      setLoadError(error instanceof DOMException && error.name === "AbortError" ? "读取今日计划超时，请检查本地服务后重试。" : error instanceof Error ? error.message : "读取今日计划失败，请重试。");
+      setLoadError(error instanceof Error ? error.message : "读取今日计划失败，请重试。");
     } finally {
-      window.clearTimeout(timeout);
       setLoading(false);
     }
   }, []);

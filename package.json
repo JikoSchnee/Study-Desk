@@ -10,8 +10,10 @@
     "desktop:prepare": "node desktop/prepare-next.cjs",
     "desktop:rebuild": "node desktop/rebuild-native.cjs",
     "desktop:sync-native": "node desktop/sync-native.cjs",
+    "desktop:verify-native": "node desktop/verify-native.cjs",
+    "desktop:smoke": "node desktop/smoke-next.cjs",
     "desktop:bundle": "node desktop/bundle.cjs",
-    "desktop:build": "npm run build && npm run desktop:prepare && npm run desktop:rebuild && npm run desktop:sync-native && npm rebuild better-sqlite3 && npm run desktop:bundle",
+    "desktop:build": "npm run build && npm run desktop:prepare && npm run desktop:rebuild && npm run desktop:sync-native && npm rebuild better-sqlite3 && npm run desktop:verify-native && npm run desktop:smoke && npm run desktop:bundle",
     "desktop:dev": "npm run desktop:build && electron .",
     "desktop:dist": "npm run desktop:build && electron-builder --publish never",
     "start": "next start",
@@ -38,6 +40,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
     "@playwright/test": "^1.55.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.0",
@@ -71,7 +74,11 @@
     "extraResources": [
       {
         "from": ".next/standalone",
-        "to": "next"
+        "to": "next",
+        "filter": [
+          "**/*",
+          "!node_modules{,/**/*}"
+        ]
       },
       {
         "from": ".next/standalone/node_modules",
@@ -117,6 +124,7 @@
     "dmg": {
       "title": "Study Desk ${version}"
     },
+    "afterPack": "desktop/after-pack.cjs",
     "publish": null
   }
 }

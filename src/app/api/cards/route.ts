@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { createCard, listCards, updateCard } from "@/lib/cards";
-import { cardLearningSummaries } from "@/lib/card-learning";
 import { filterAndSortCards, type CardSort, type SortDirection } from "@/lib/card-filters";
 import { answerFromPoints, answerPointHierarchyError, answerPointsFromText, hasCoreAnswerPoint } from "@/lib/import";
+import { isNativeAddonError, localApiErrorResponse } from "@/lib/local-api-error";
 
 const questionVariantSchema = z.object({ id: z.string().min(1), content: z.string(), source: z.enum(["manual", "ai"]) });
 const answerPointSchema = z.object({ id: z.string().min(1), content: z.string(), hint: z.string().optional().default(""), note: z.string().optional().default(""), role: z.enum(["opening", "key", "closing"]).optional().default("key"), parentId: z.string().min(1).optional() });
@@ -40,40 +39,47 @@ const cardQuerySchema = z.object({
 });
 
 export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const input = cardQuerySchema.parse({
-    offset: url.searchParams.get("offset") ?? undefined,
-    limit: url.searchParams.get("limit") ?? undefined,
-    query: url.searchParams.get("query") ?? undefined,
-    track: url.searchParams.get("track") ?? undefined,
-    tags: url.searchParams.getAll("tag"),
-    sort: url.searchParams.get("sort") ?? undefined,
-    direction: url.searchParams.get("direction") ?? undefined,
-    archived: url.searchParams.get("archived") ?? undefined,
-  });
-  const allCards = listCards();
-  const catalog = allCards.filter((card) => input.archived === "true" ? card.status === "archived" : card.status !== "archived");
-  const catalogLearning = cardLearningSummaries(catalog.map((card) => card.id));
-  const matching = filterAndSortCards(catalog, catalogLearning, { query: input.query, track: input.track, tags: new Set(input.tags), sort: input.sort as CardSort, direction: input.direction as SortDirection });
-  const cards = matching.slice(input.offset, input.offset + input.limit);
-  return NextResponse.json({
-    cards,
-    learning: Object.fromEntries(cards.flatMap((card) => catalogLearning[card.id] ? [[card.id, catalogLearning[card.id]]] : [])),
-    total: matching.length,
-    catalogTotal: catalog.length,
-    hasMore: input.offset + cards.length < matching.length,
-    facets: {
-      tracks: [...new Set(allCards.map((card) => card.track))].sort((left, right) => left.localeCompare(right, "zh-CN")),
-      tags: [...new Set(allCards.flatMap((card) => card.tags))].sort((left, right) => left.localeCompare(right, "zh-CN")),
-    },
-  });
+  try {
+    const url = new URL(request.url);
+    const input = cardQuerySchema.parse({
+      offset: url.searchParams.get("offset") ?? undefined,
+      limit: url.searchParams.get("limit") ?? undefined,
+      query: url.searchParams.get("query") ?? undefined,
+      track: url.searchParams.get("track") ?? undefined,
+      tags: url.searchParams.getAll("tag"),
+      sort: url.searchParams.get("sort") ?? undefined,
+      direction: url.searchParams.get("direction") ?? undefined,
+      archived: url.searchParams.get("archived") ?? undefined,
+    });
+    const [{ listCards }, { cardLearningSummaries }] = await Promise.all([import("@/lib/cards"), import("@/lib/card-learning")]);
+    const allCards = listCards();
+    const catalog = allCards.filter((card) => input.archived === "true" ? card.status === "archived" : card.status !== "archived");
+    const catalogLearning = cardLearningSummaries(catalog.map((card) => card.id));
+    const matching = filterAndSortCards(catalog, catalogLearning, { query: input.query, track: input.track, tags: new Set(input.tags), sort: input.sort as CardSort, direction: input.direction as SortDirection });
+    const cards = matching.slice(input.offset, input.offset + input.limit);
+    return NextResponse.json({
+      cards,
+      learning: Object.fromEntries(cards.flatMap((card) => catalogLearning[card.id] ? [[card.id, catalogLearning[card.id]]] : [])),
+      total: matching.length,
+      catalogTotal: catalog.length,
+      hasMore: input.offset + cards.length < matching.length,
+      facets: {
+        tracks: [...new Set(allCards.map((card) => card.track))].sort((left, right) => left.localeCompare(right, "zh-CN")),
+        tags: [...new Set(allCards.flatMap((card) => card.tags))].sort((left, right) => left.localeCompare(right, "zh-CN")),
+      },
+    });
+  } catch (error) {
+    return localApiErrorResponse("Failed to list cards", error, "无法读取藏品。");
+  }
 }
 export async function POST(request: Request) {
   try {
     const input = cardSchema.parse(await request.json());
+    const { createCard } = await import("@/lib/cards");
     const created = createCard(input);
     return NextResponse.json({ card: created }, { status: 201 });
   } catch (error) {
+    if (isNativeAddonError(error)) return localApiErrorResponse("Failed to create a card", error, "无法保存卡片。");
     return NextResponse.json({ error: error instanceof Error ? error.message : "无法保存卡片。" }, { status: 400 });
   }
 }
@@ -81,10 +87,12 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   try {
     const input = updateCardSchema.parse(await request.json());
+    const { updateCard } = await import("@/lib/cards");
     const card = updateCard(input.id, input);
     if (!card) return NextResponse.json({ error: "找不到卡片。" }, { status: 404 });
     return NextResponse.json({ card });
   } catch (error) {
+    if (isNativeAddonError(error)) return localApiErrorResponse("Failed to update a card", error, "无法更新卡片。");
     return NextResponse.json({ error: error instanceof Error ? error.message : "无法更新卡片。" }, { status: 400 });
   }
 }
