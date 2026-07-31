@@ -14,6 +14,7 @@ type CardDraft = { question: string; questionVariants: QuestionVariant[]; relati
 type SheetInfo = { name: string; headers: string[]; mapping: ImportColumnMapping };
 type SaveFeedback = { tone: "success" | "error"; message: string };
 const defaultKnowledgeBaseTypes = ["Agent", "Java 后端", "计算机基础"];
+const lastManualTrackStorageKey = "mock-interview:last-manual-track";
 
 function pointId() {
   const uuid = globalThis.crypto?.randomUUID?.();
@@ -21,7 +22,11 @@ function pointId() {
 }
 
 const point = (content = "", hint = "", note = "", role: AnswerPoint["role"] = "key"): AnswerPoint => ({ id: pointId(), content, hint, note, role });
-const freshDraft = (): CardDraft => ({ question: "", questionVariants: [], relations: [], answerPoints: [point()], note: "", track: "Agent", tags: "", source: "" });
+function lastManualTrack() {
+  if (typeof window === "undefined") return "Agent";
+  return window.localStorage.getItem(lastManualTrackStorageKey)?.trim() || "Agent";
+}
+const freshDraft = (track = "Agent"): CardDraft => ({ question: "", questionVariants: [], relations: [], answerPoints: [point()], note: "", track, tags: "", source: "" });
 
 type CardWorkspaceProps = {
   initialMode: "manual" | "import";
@@ -61,6 +66,10 @@ export function CardWorkspace({ initialMode, onClose, onComplete }: CardWorkspac
   }, []);
   const load = useCallback(() => fetch("/api/cards").then((response) => response.json()).then((data) => setCards(data.cards)), []);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const track = lastManualTrack();
+    if (track !== "Agent") setDraft((current) => current.question || current.answerPoints.some((item) => item.content) ? current : { ...current, track });
+  }, []);
   useEffect(() => {
     if (!saveFeedback) return;
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -159,6 +168,7 @@ export function CardWorkspace({ initialMode, onClose, onComplete }: CardWorkspac
         return message;
       }
       const createdCard = data.card as Card;
+      window.localStorage.setItem(lastManualTrackStorageKey, createdCard.track);
       if (newCardRelationType) {
         setDraft(createRelatedCardDraft(createdCard, newCardRelationType, point()));
         setAiCandidates([]);
@@ -167,7 +177,7 @@ export function CardWorkspace({ initialMode, onClose, onComplete }: CardWorkspac
         scrollToPageTop();
         onComplete?.("卡片已加入首次学习队列，并已打开一张关联卡片草稿。", "manual");
       } else {
-        setDraft(freshDraft());
+        setDraft(freshDraft(createdCard.track));
         onComplete?.("卡片已加入首次学习队列；先看懂答案要点，明天再开始第一次主动回忆。", "manual");
       }
       await load();
@@ -183,7 +193,7 @@ export function CardWorkspace({ initialMode, onClose, onComplete }: CardWorkspac
   const saveAndCreateRelated = (relationType: CardRelationType) => { void saveCard(relationType); };
   const clearDraft = () => {
     if (!window.confirm("确定要清空当前填写的卡片内容吗？此操作无法撤销。")) return;
-    setDraft(freshDraft());
+    setDraft(freshDraft(lastManualTrack()));
     setAiCandidates([]);
     setNotice("");
     setSaveFeedback(null);
