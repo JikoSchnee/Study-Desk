@@ -5,12 +5,12 @@ import { shanghaiDayBounds, todayShanghai } from "@/lib/utils";
 import { listCards } from "@/lib/cards";
 import { getAppSettings } from "@/lib/settings";
 import type { DailyTask } from "@/lib/types";
-import { dailyReportDates } from "@/lib/daily-reports";
+import { dailyReportDates, refreshDailyLearningReport } from "@/lib/daily-reports";
 
 function rowToTask(row: Record<string, unknown>): DailyTask {
   return {
     id: row.id as string, planDate: row.plan_date as string, kind: row.kind as DailyTask["kind"], title: row.title as string,
-    detail: row.detail as string | null, cardId: row.card_id as string | null, estimateMinutes: row.estimate_minutes as number, status: row.status as DailyTask["status"],
+    detail: row.detail as string | null, cardId: row.card_id as string | null, estimateMinutes: row.estimate_minutes as number, status: row.status as DailyTask["status"], completedAt: row.completed_at as string | null,
   };
 }
 
@@ -23,7 +23,7 @@ export function ensureDailyPlan(date = todayShanghai()) {
   // part of the migration instead of leaving misleading, disconnected tasks.
   sqlite.prepare("DELETE FROM daily_tasks WHERE plan_date = ? AND kind = 'interview'").run(date);
   const existingTasks = listDailyTasks(date);
-  const assignedCards = new Set(existingTasks.filter((task) => task.status !== "skipped").map((task) => task.cardId).filter(Boolean));
+  const assignedCards = new Set(listActiveDailyTasks(date).filter((task) => task.status === "todo").map((task) => task.cardId).filter(Boolean));
   const now = new Date().toISOString();
   const insertTask = (kind: "review" | "learn", title: string, cardId: string, estimate: number) => {
     sqlite.prepare("INSERT INTO daily_tasks (id, plan_date, kind, title, card_id, estimate_minutes, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'todo', ?)")
@@ -42,18 +42,28 @@ export function ensureDailyPlan(date = todayShanghai()) {
   return listDailyTasks(date);
 }
 
-/** Clear unfinished plans from earlier days, then rebuild today's plan from the current queue. */
+/** Shrinks the rolling plan from its newest tasks while keeping today's completed work. */
 export function restartDailyPlan(date = todayShanghai()) {
+  ensureDailyPlan(date);
+  const preference = getAppSettings();
+  const { start, end } = shanghaiDayBounds(date);
   sqlite.transaction(() => {
-    sqlite.prepare("UPDATE daily_tasks SET status = 'skipped' WHERE plan_date < ? AND status = 'todo'").run(date);
-    sqlite.prepare("DELETE FROM daily_tasks WHERE plan_date = ?").run(date);
-    sqlite.prepare("DELETE FROM daily_plans WHERE date = ?").run(date);
+    const trimKind = (kind: "learn" | "review", target: number) => {
+      const completed = sqlite.prepare("SELECT COUNT(*) AS count FROM daily_tasks WHERE kind = ? AND status = 'done' AND completed_at >= ? AND completed_at < ?").get(kind, start, end) as { count: number };
+      const pending = sqlite.prepare("SELECT id FROM daily_tasks WHERE kind = ? AND status = 'todo' AND plan_date <= ? ORDER BY plan_date DESC, created_at DESC, id DESC").all(kind, date) as Array<{ id: string }>;
+      const remove = Math.max(0, Number(completed.count) + pending.length - target);
+      const deleteTask = sqlite.prepare("DELETE FROM daily_tasks WHERE id = ?");
+      for (const task of pending.slice(0, remove)) deleteTask.run(task.id);
+    };
+    trimKind("learn", preference.dailyInitialTarget);
+    trimKind("review", preference.dailyReviewTarget);
   })();
-  return ensureDailyPlan(date);
+  refreshDailyLearningReport(date);
+  return listActiveDailyTasks(date);
 }
 
 function nextExtraInitialStudyCard(date: string) {
-  const assignedCardIds = new Set(listDailyTasks(date).map((task) => task.cardId).filter(Boolean));
+  const assignedCardIds = new Set(listActiveDailyTasks(date).filter((task) => task.status === "todo").map((task) => task.cardId).filter(Boolean));
   return listCards()
     .filter((item) => item.status === "learning" && !assignedCardIds.has(item.id))
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))[0] ?? null;
@@ -87,15 +97,21 @@ export function listDailyTasks(date = todayShanghai()) {
   return (sqlite.prepare("SELECT * FROM daily_tasks WHERE plan_date = ? ORDER BY CASE kind WHEN 'review' THEN 1 WHEN 'learn' THEN 2 WHEN 'interview' THEN 3 ELSE 4 END").all(date) as Record<string, unknown>[]).map(rowToTask);
 }
 
+/** Today includes unfinished carry-over work plus tasks actually completed today. */
+export function listActiveDailyTasks(date = todayShanghai()) {
+  const { start, end } = shanghaiDayBounds(date);
+  return (sqlite.prepare("SELECT * FROM daily_tasks WHERE plan_date <= ? AND (status = 'todo' OR (status = 'done' AND completed_at >= ? AND completed_at < ?)) ORDER BY plan_date ASC, created_at ASC, id ASC").all(date, start, end) as Record<string, unknown>[]).map(rowToTask);
+}
+
 export function updateTask(id: string, status: "todo" | "done" | "skipped") {
-  sqlite.prepare("UPDATE daily_tasks SET status = ? WHERE id = ?").run(status, id);
+  sqlite.prepare("UPDATE daily_tasks SET status = ?, completed_at = ? WHERE id = ?").run(status, status === "done" ? new Date().toISOString() : null, id);
   return sqlite.prepare("SELECT * FROM daily_tasks WHERE id = ?").get(id);
 }
 
 /** A plan is progress, not a checkbox: completing the matching learning action completes its task. */
 export function completeTodayTaskForCard(cardId: string, kind: "learn" | "review") {
-  sqlite.prepare("UPDATE daily_tasks SET status = 'done' WHERE plan_date = ? AND card_id = ? AND kind = ? AND status = 'todo'")
-    .run(todayShanghai(), cardId, kind);
+  sqlite.prepare("UPDATE daily_tasks SET status = 'done', completed_at = ? WHERE plan_date <= ? AND card_id = ? AND kind = ? AND status = 'todo'")
+    .run(new Date().toISOString(), todayShanghai(), cardId, kind);
 }
 
 export function calendarSummary(month: string) {

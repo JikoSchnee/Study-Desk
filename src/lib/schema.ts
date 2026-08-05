@@ -66,6 +66,7 @@ export const dailyTasks = sqliteTable("daily_tasks", {
   estimateMinutes: integer("estimate_minutes").notNull(),
   status: text("status").notNull(),
   createdAt: text("created_at").notNull(),
+  completedAt: text("completed_at"),
 });
 
 export const dailyReports = sqliteTable("daily_reports", {

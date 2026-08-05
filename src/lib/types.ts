@@ -100,6 +100,7 @@ export interface DailyTask {
   cardId?: string | null;
   estimateMinutes: number;
   status: TaskStatus;
+  completedAt?: string | null;
 }
 
 export type DailyReportItem = {

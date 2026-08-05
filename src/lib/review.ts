@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { sqlite } from "@/lib/db";
 import { getCard, listCards, updateCardStatus } from "@/lib/cards";
 import { nextShanghaiMorning, todayShanghai } from "@/lib/utils";
-import { completeTodayTaskForCard, ensureDailyPlan, listDailyTasks } from "@/lib/planner";
+import { completeTodayTaskForCard, ensureDailyPlan, listActiveDailyTasks } from "@/lib/planner";
 import { clearPriorityPractice, focusedCards, isPriorityPractice } from "@/lib/practice-focus";
 import { refreshDailyLearningReport } from "@/lib/daily-reports";
 import type { AnswerComparison, Card, RatingName } from "@/lib/types";
@@ -89,7 +89,7 @@ function plannedCards(kind: "initial" | "review") {
   const date = todayShanghai();
   ensureDailyPlan(date);
   const taskKind = kind === "initial" ? "learn" : "review";
-  const taskIds = listDailyTasks(date)
+  const taskIds = listActiveDailyTasks(date)
     .filter((task) => task.kind === taskKind && task.status === "todo" && task.cardId)
     .map((task) => task.cardId!);
   const cards = new Map(listCards().map((card) => [card.id, card]));
@@ -99,7 +99,7 @@ function plannedCards(kind: "initial" | "review") {
 export function reviewQueueProgress(): ReviewQueueProgress {
   const date = todayShanghai();
   ensureDailyPlan(date);
-  const tasks = listDailyTasks(date);
+  const tasks = listActiveDailyTasks(date);
   const progressFor = (kind: "learn" | "review") => ({
     pending: tasks.filter((task) => task.kind === kind && task.status === "todo").length,
     completedToday: tasks.filter((task) => task.kind === kind && task.status === "done").length,

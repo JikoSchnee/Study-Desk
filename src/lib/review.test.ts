@@ -62,7 +62,7 @@ vi.mock("@/lib/cards", () => ({
 vi.mock("@/lib/planner", () => ({
   completeTodayTaskForCard: () => undefined,
   ensureDailyPlan: () => planner.tasks,
-  listDailyTasks: () => planner.tasks,
+  listActiveDailyTasks: () => planner.tasks,
 }));
 
 import { completeInitialStudy, dueCards, initialCards, nextReviewCard, submitReview } from "@/lib/review";

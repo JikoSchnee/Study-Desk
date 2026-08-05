@@ -7,8 +7,9 @@ export async function GET() {
     // Loading the SQLite-backed planner inside the handler keeps startup errors
     // within this JSON boundary. Otherwise Next renders an HTML error document,
     // which desktop clients cannot safely parse as an API response.
-    const [{ dashboardReviewCounts, ensureDailyPlan }, { getDailyLearningReport }] = await Promise.all([import("@/lib/planner"), import("@/lib/daily-reports")]);
-    const tasks = ensureDailyPlan();
+    const [{ dashboardReviewCounts, ensureDailyPlan, listActiveDailyTasks }, { getDailyLearningReport }] = await Promise.all([import("@/lib/planner"), import("@/lib/daily-reports")]);
+    ensureDailyPlan();
+    const tasks = listActiveDailyTasks();
     const reviewCounts = dashboardReviewCounts();
     const date = todayShanghai();
     return NextResponse.json({ date, tasks, report: getDailyLearningReport(date), totals: { dueReview: reviewCounts.dueNow, reviewedToday: reviewCounts.reviewedToday, completed: tasks.filter((task) => task.status === "done").length } });

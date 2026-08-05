@@ -4,7 +4,7 @@ import { getAppSettings } from "@/lib/settings";
 import { shanghaiDayBounds, todayShanghai } from "@/lib/utils";
 import type { DailyLearningReport, DailyReportItem, RatingName } from "@/lib/types";
 
-type TaskRow = { id: string; card_id: string | null; title: string; kind: "learn" | "review"; status: string };
+type TaskRow = { id: string; card_id: string | null; title: string; kind: "learn" | "review"; status: string; completed_at: string | null };
 
 function questionOf(task: TaskRow) { return task.title.replace(/^(学习|复习)：/, ""); }
 
@@ -42,15 +42,20 @@ function reportItems(date: string, tasks: TaskRow[]): DailyReportItem[] {
   }, []);
 }
 
-/** Creates a stable daily snapshot only when all planned study tasks are done. */
+/** Creates a report from the work actually completed on the selected day. */
 export function refreshDailyLearningReport(date = todayShanghai()) {
   pruneDailyReports();
-  const tasks = sqlite.prepare("SELECT id, card_id, title, kind, status FROM daily_tasks WHERE plan_date = ? AND kind IN ('learn', 'review') ORDER BY CASE kind WHEN 'learn' THEN 1 ELSE 2 END, created_at, id").all(date) as TaskRow[];
-  if (!tasks.length || tasks.some((task) => task.status !== "done")) return null;
+  const { start, end } = shanghaiDayBounds(date);
+  const tasks = sqlite.prepare("SELECT id, card_id, title, kind, status, completed_at FROM daily_tasks WHERE kind IN ('learn', 'review') AND status = 'done' AND completed_at >= ? AND completed_at < ? ORDER BY CASE kind WHEN 'learn' THEN 1 ELSE 2 END, completed_at, id").all(start, end) as TaskRow[];
+  if (!tasks.length) {
+    sqlite.transaction(() => {
+      sqlite.prepare("DELETE FROM daily_report_items WHERE report_date = ?").run(date);
+      sqlite.prepare("DELETE FROM daily_reports WHERE report_date = ?").run(date);
+    })();
+    return null;
+  }
   const items = reportItems(date, tasks);
-  // A task that was marked done without a matching learning result is incomplete
-  // for reporting purposes; wait for the log-producing request to finish.
-  if (items.length !== tasks.length) return null;
+  if (!items.length) return null;
   const initialCount = items.filter((item) => item.kind === "learn").length;
   const reviews = items.filter((item) => item.kind === "review");
   const averageScore = reviews.length ? Math.round(reviews.reduce((total, item) => total + (item.score ?? 0), 0) / reviews.length) : null;
