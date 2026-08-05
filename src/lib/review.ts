@@ -6,6 +6,7 @@ import { getCard, listCards, updateCardStatus } from "@/lib/cards";
 import { nextShanghaiMorning, shanghaiDayBounds } from "@/lib/utils";
 import { completeTodayTaskForCard } from "@/lib/planner";
 import { clearPriorityPractice, focusedCards, isPriorityPractice } from "@/lib/practice-focus";
+import { refreshDailyLearningReport } from "@/lib/daily-reports";
 import type { AnswerComparison, Card, RatingName } from "@/lib/types";
 
 export type ReviewQueueKind = "initial" | "review" | "weak";
@@ -69,6 +70,7 @@ export function completeInitialStudy(cardId: string) {
     sqlite.prepare("UPDATE cards SET status = 'review', updated_at = ? WHERE id = ?").run(completedAt, cardId);
     completeTodayTaskForCard(cardId, "learn");
   })();
+  refreshDailyLearningReport();
   return { dueAt, card: getCard(cardId) };
 }
 
@@ -122,5 +124,6 @@ export function submitReview(cardId: string, response: string, score: number, su
     completeTodayTaskForCard(cardId, "review");
     clearPriorityPractice(cardId);
   })();
+  refreshDailyLearningReport();
   return { dueAt: due, card: getCard(cardId), isInitial };
 }

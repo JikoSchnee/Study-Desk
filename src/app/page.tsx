@@ -5,14 +5,16 @@ import Link from "next/link";
 import { AlertCircle, BookOpen, Check, CircleOff, ClipboardList, Flame, Mic2, RefreshCw, Target } from "lucide-react";
 import { HomeTutorialDialog } from "@/components/home-tutorial-dialog";
 import { TrainingCalendar } from "@/components/training-calendar";
+import { DailyLearningReportView } from "@/components/daily-learning-report";
 import { Button, Panel } from "@/components/ui";
 import { TourButton } from "@/components/tour";
 import { fetchJson } from "@/lib/client-api";
-import type { DailyTask } from "@/lib/types";
+import type { DailyLearningReport, DailyTask } from "@/lib/types";
 
 type DashboardData = {
   date: string;
   tasks: DailyTask[];
+  report: DailyLearningReport | null;
   totals: { dueReview: number; reviewedToday: number; completed: number };
 };
 
@@ -107,7 +109,7 @@ export default function TodayPage() {
       <div className="hero-summary" data-tour="today-summary" aria-label="今日复习概况"><div className="hero-stat"><strong>{data.totals.dueReview}</strong><span>此刻待复习</span></div><div className="hero-stat"><strong>{data.totals.reviewedToday}</strong><span>今日已复习</span></div><div className="hero-stat"><strong>{totalPercent}%</strong><span>目标完成</span></div></div>
     </section>
     <div className="two-column" style={{ marginTop: 20 }}>
-      <div className="stack"><TutorialLauncher onLaunch={() => setTutorialOpen(true)} /><Panel data-tour="daily-tasks"><div className="section-title"><div><p className="eyebrow"><Target size={15}/> 任务路径</p><h2>今天的小步</h2></div><strong>{completedGoals}/{activeGoals.length}</strong></div><div className="progress-track goal-total-progress" aria-label={`已完成 ${completedGoals} 个今日目标，共 ${activeGoals.length} 个`}><i style={{ width: `${totalPercent}%` }} /></div><div className="daily-goals" aria-label="今日学习与复习目标">{goals.map((goal) => <section className={`daily-goal ${goal.kind} ${goal.complete ? "complete" : ""}`} key={goal.kind}><div className="daily-goal-heading"><div><span className="kind">{goal.kind === "learn" ? "学" : "复"}</span><strong>{goal.label}</strong></div><b>{goal.completed}/{goal.total}</b></div><div className="progress-track" aria-label={`${goal.label}：${goal.completed}/${goal.total}`}><i style={{ width: `${goal.percent}%` }} /></div><div className="daily-goal-footer"><small>{goal.total === 0 ? goal.idle : goal.complete ? "今日目标已完成，仍可继续练习。" : `还差 ${goal.total - goal.completed} 张`}</small>{goal.complete ? <span className="goal-complete"><Check size={15}/> 已完成</span> : goal.total > 0 ? <Link href={`/review?queue=${goal.queue}`}><Button variant={goal.kind === "learn" ? "primary" : "secondary"}>{goal.action}</Button></Link> : goal.kind === "learn" ? <Link href="/library"><Button variant="ghost">去创建卡片</Button></Link> : <Button variant="ghost" disabled>暂无复习</Button>}</div></section>)}</div></Panel></div>
+      <div className="stack"><TutorialLauncher onLaunch={() => setTutorialOpen(true)} /><Panel data-tour="daily-tasks"><div className="section-title"><div><p className="eyebrow"><Target size={15}/> 任务路径</p><h2>今天的小步</h2></div><strong>{completedGoals}/{activeGoals.length}</strong></div><div className="progress-track goal-total-progress" aria-label={`已完成 ${completedGoals} 个今日目标，共 ${activeGoals.length} 个`}><i style={{ width: `${totalPercent}%` }} /></div><div className="daily-goals" aria-label="今日学习与复习目标">{goals.map((goal) => <section className={`daily-goal ${goal.kind} ${goal.complete ? "complete" : ""}`} key={goal.kind}><div className="daily-goal-heading"><div><span className="kind">{goal.kind === "learn" ? "学" : "复"}</span><strong>{goal.label}</strong></div><b>{goal.completed}/{goal.total}</b></div><div className="progress-track" aria-label={`${goal.label}：${goal.completed}/${goal.total}`}><i style={{ width: `${goal.percent}%` }} /></div><div className="daily-goal-footer"><small>{goal.total === 0 ? goal.idle : goal.complete ? "今日目标已完成，仍可继续练习。" : `还差 ${goal.total - goal.completed} 张`}</small>{goal.complete ? <span className="goal-complete"><Check size={15}/> 已完成</span> : goal.total > 0 ? <Link href={`/review?queue=${goal.queue}`}><Button variant={goal.kind === "learn" ? "primary" : "secondary"}>{goal.action}</Button></Link> : goal.kind === "learn" ? <Link href="/library"><Button variant="ghost">去创建卡片</Button></Link> : <Button variant="ghost" disabled>暂无复习</Button>}</div></section>)}</div></Panel>{data.report && <Panel className="today-report-panel"><DailyLearningReportView report={data.report} compact /></Panel>}</div>
       <div className="stack"><Panel className="lime-panel continuous-training" data-tour="training-calendar"><p className="eyebrow"><ClipboardList size={15}/> 连续训练</p><h2>每天一点，<br/>就会更稳。</h2><p className="muted-copy">看见你持续练习的每一天。</p><TrainingCalendar /></Panel></div>
     </div>
   </>;

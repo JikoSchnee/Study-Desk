@@ -36,4 +36,13 @@ describe("embedding model source setting", () => {
     database.rows = [];
     expect(getAppSettings()).toMatchObject({ autoBackupEnabled: true, autoBackupMode: "daily", autoBackupMaxStorageMb: 100, autoBackupOverflowPolicy: "delete-oldest" });
   });
+
+  it("keeps daily reports for 30 days by default and supports permanent retention", () => {
+    database.rows = [];
+    expect(getAppSettings().dailyReportRetentionDays).toBe(30);
+    database.rows = [{ key: "dailyReportRetentionDays", value: "permanent" }];
+    expect(getAppSettings().dailyReportRetentionDays).toBeNull();
+    saveAppSettings({ ...getAppSettings(), dailyReportRetentionDays: null });
+    expect(database.run).toHaveBeenCalledWith("dailyReportRetentionDays", "permanent");
+  });
 });

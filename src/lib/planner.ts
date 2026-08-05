@@ -5,6 +5,7 @@ import { shanghaiDayBounds, todayShanghai } from "@/lib/utils";
 import { listCards } from "@/lib/cards";
 import { getAppSettings } from "@/lib/settings";
 import type { DailyTask } from "@/lib/types";
+import { dailyReportDates } from "@/lib/daily-reports";
 
 function rowToTask(row: Record<string, unknown>): DailyTask {
   return {
@@ -67,7 +68,8 @@ export function completeTodayTaskForCard(cardId: string, kind: "learn" | "review
 }
 
 export function calendarSummary(month: string) {
-  return sqlite.prepare(`SELECT plan_date as date, COUNT(*) as total, SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) as completed, SUM(estimate_minutes) as minutes FROM daily_tasks WHERE plan_date LIKE ? GROUP BY plan_date`).all(`${month}%`);
+  const reports = dailyReportDates(month);
+  return (sqlite.prepare(`SELECT plan_date as date, COUNT(*) as total, SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) as completed, SUM(estimate_minutes) as minutes FROM daily_tasks WHERE plan_date LIKE ? GROUP BY plan_date`).all(`${month}%`) as Array<{ date: string; total: number; completed: number; minutes: number }>).map((day) => ({ ...day, hasReport: reports.has(day.date) }));
 }
 
 export function dashboardReviewCounts(now = new Date()) {

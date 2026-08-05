@@ -21,6 +21,8 @@ sqlite.exec(`
   CREATE TABLE IF NOT EXISTS initial_study_logs (card_id TEXT PRIMARY KEY, completed_at TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS daily_plans (date TEXT PRIMARY KEY, budget_minutes INTEGER NOT NULL, created_at TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS daily_tasks (id TEXT PRIMARY KEY, plan_date TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL, detail TEXT, card_id TEXT, estimate_minutes INTEGER NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS daily_reports (report_date TEXT PRIMARY KEY, total INTEGER NOT NULL, initial_count INTEGER NOT NULL, review_count INTEGER NOT NULL, average_score INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS daily_report_items (task_id TEXT PRIMARY KEY, report_date TEXT NOT NULL, card_id TEXT, question TEXT NOT NULL, kind TEXT NOT NULL, completed_at TEXT NOT NULL, score INTEGER, rating TEXT, feedback TEXT, next_review_at TEXT);
   CREATE TABLE IF NOT EXISTS interview_sessions (id TEXT PRIMARY KEY, config TEXT NOT NULL, status TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT);
   CREATE TABLE IF NOT EXISTS interview_turns (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, card_id TEXT, question TEXT NOT NULL, answer TEXT, score INTEGER, feedback TEXT, comparison_mode TEXT, answer_comparison TEXT, is_extension INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS knowledge_maintenance_proposals (id TEXT PRIMARY KEY, card_id TEXT NOT NULL, target_path TEXT NOT NULL, status TEXT NOT NULL, file_hash TEXT NOT NULL, created_at TEXT NOT NULL);

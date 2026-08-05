@@ -6,6 +6,7 @@ import type { AnswerComparisonMode, EmbeddingModelSource, TagDisplayLanguage } f
 export type AppSettings = {
   dailyInitialTarget: number;
   dailyReviewTarget: number;
+  dailyReportRetentionDays: number | null;
   answerComparisonMode: AnswerComparisonMode;
   embeddingModelSource: EmbeddingModelSource;
   stabilityRarityPreset: StabilityRarityPreset;
@@ -17,7 +18,7 @@ export type AppSettings = {
   autoBackupOverflowPolicy: "delete-oldest" | "pause";
 };
 
-const defaults: AppSettings = { dailyInitialTarget: 5, dailyReviewTarget: 10, answerComparisonMode: "embedding", embeddingModelSource: "automatic", stabilityRarityPreset: "memory-cycle", tagDisplayLanguage: "zh", knowledgeBasePath: "", autoBackupEnabled: true, autoBackupMode: "daily", autoBackupMaxStorageMb: 100, autoBackupOverflowPolicy: "delete-oldest" };
+const defaults: AppSettings = { dailyInitialTarget: 5, dailyReviewTarget: 10, dailyReportRetentionDays: 30, answerComparisonMode: "embedding", embeddingModelSource: "automatic", stabilityRarityPreset: "memory-cycle", tagDisplayLanguage: "zh", knowledgeBasePath: "", autoBackupEnabled: true, autoBackupMode: "daily", autoBackupMaxStorageMb: 100, autoBackupOverflowPolicy: "delete-oldest" };
 
 export function getAppSettings(): AppSettings {
   const rows = sqlite.prepare("SELECT key, value FROM settings").all() as Array<{ key: string; value: string }>;
@@ -26,6 +27,7 @@ export function getAppSettings(): AppSettings {
     // Keep existing installations usable while they migrate to count-based goals.
     dailyInitialTarget: Number(values.dailyInitialTarget) || defaults.dailyInitialTarget,
     dailyReviewTarget: Number(values.dailyReviewTarget) || defaults.dailyReviewTarget,
+    dailyReportRetentionDays: values.dailyReportRetentionDays === "permanent" ? null : [7, 30, 90, 180, 365].includes(Number(values.dailyReportRetentionDays)) ? Number(values.dailyReportRetentionDays) : defaults.dailyReportRetentionDays,
     answerComparisonMode: values.answerComparisonMode === "llm" ? "llm" : "embedding",
     embeddingModelSource: values.embeddingModelSource === "offline" ? "offline" : "automatic",
     stabilityRarityPreset: rarityPreset(values.stabilityRarityPreset),
@@ -42,6 +44,7 @@ export function saveAppSettings(input: AppSettings) {
   const statement = sqlite.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value");
   statement.run("dailyInitialTarget", String(input.dailyInitialTarget));
   statement.run("dailyReviewTarget", String(input.dailyReviewTarget));
+  statement.run("dailyReportRetentionDays", input.dailyReportRetentionDays === null ? "permanent" : String(input.dailyReportRetentionDays));
   statement.run("answerComparisonMode", input.answerComparisonMode);
   statement.run("embeddingModelSource", input.embeddingModelSource);
   statement.run("stabilityRarityPreset", input.stabilityRarityPreset);

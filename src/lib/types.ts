@@ -102,6 +102,27 @@ export interface DailyTask {
   status: TaskStatus;
 }
 
+export type DailyReportItem = {
+  taskId: string;
+  cardId: string | null;
+  question: string;
+  kind: "learn" | "review";
+  completedAt: string;
+  score: number | null;
+  rating: RatingName | null;
+  feedback: string | null;
+  nextReviewAt: string | null;
+};
+
+export type DailyLearningReport = {
+  date: string;
+  total: number;
+  initialCount: number;
+  reviewCount: number;
+  averageScore: number | null;
+  items: DailyReportItem[];
+};
+
 export interface Evaluation {
   score: number;
   suggestedRating: RatingName;

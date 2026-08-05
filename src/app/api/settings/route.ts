@@ -15,6 +15,7 @@ export async function PUT(request: Request) {
     const input = z.object({
       dailyInitialTarget: z.number().int().min(0).max(100),
       dailyReviewTarget: z.number().int().min(0).max(200),
+      dailyReportRetentionDays: z.union([z.literal(7), z.literal(30), z.literal(90), z.literal(180), z.literal(365), z.null()]).default(30),
       answerComparisonMode: z.enum(["embedding", "llm"]).default("embedding"),
       embeddingModelSource: z.enum(["automatic", "offline"]).default("automatic"),
       stabilityRarityPreset: z.enum(["fast", "memory-cycle", "long-term"]).default("memory-cycle"),
@@ -32,6 +33,7 @@ export async function PUT(request: Request) {
     }
     const { saveAppSettings } = await import("@/lib/settings");
     const saved = saveAppSettings(input);
+    (await import("@/lib/daily-reports")).pruneDailyReports();
     const autoBackup = await import("@/lib/auto-backup");
     autoBackup.triggerAutoBackup();
     return NextResponse.json({ ...saved, autoBackupStatus: autoBackup.getAutoBackupStatus() });

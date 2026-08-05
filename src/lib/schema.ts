@@ -68,6 +68,14 @@ export const dailyTasks = sqliteTable("daily_tasks", {
   createdAt: text("created_at").notNull(),
 });
 
+export const dailyReports = sqliteTable("daily_reports", {
+  reportDate: text("report_date").primaryKey(), total: integer("total").notNull(), initialCount: integer("initial_count").notNull(), reviewCount: integer("review_count").notNull(), averageScore: integer("average_score"), createdAt: text("created_at").notNull(), updatedAt: text("updated_at").notNull(),
+});
+
+export const dailyReportItems = sqliteTable("daily_report_items", {
+  taskId: text("task_id").primaryKey(), reportDate: text("report_date").notNull(), cardId: text("card_id"), question: text("question").notNull(), kind: text("kind").notNull(), completedAt: text("completed_at").notNull(), score: integer("score"), rating: text("rating"), feedback: text("feedback"), nextReviewAt: text("next_review_at"),
+});
+
 export const interviewSessions = sqliteTable("interview_sessions", {
   id: text("id").primaryKey(),
   config: text("config").notNull(),
