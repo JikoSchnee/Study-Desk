@@ -8,10 +8,12 @@ const review = vi.hoisted(() => ({
   },
 }));
 const learning = vi.hoisted(() => ({ summaries: {} as Record<string, unknown> }));
+const planner = vi.hoisted(() => ({ extraInitialStudyAvailable: true }));
 
 vi.mock("@/lib/review", () => ({ nextReviewCard: () => review.result }));
 vi.mock("@/lib/card-learning", () => ({ cardLearningSummaries: () => learning.summaries }));
 vi.mock("@/lib/question-variants", () => ({ pickPresentedQuestion: (card: { question: string }) => `变体：${card.question}` }));
+vi.mock("@/lib/planner", () => ({ hasExtraInitialStudy: () => planner.extraInitialStudyAvailable }));
 
 import { GET } from "@/app/api/review/next/route";
 
@@ -29,7 +31,7 @@ describe("GET /api/review/next", () => {
   it("returns an empty selected queue with its progress", async () => {
     const response = await GET(request("review"));
 
-    expect(await response.json()).toEqual({ card: null, learning: null, pending: 0, progress: review.result.progress, presentedQuestion: null });
+    expect(await response.json()).toEqual({ card: null, learning: null, pending: 0, progress: review.result.progress, extraInitialStudyAvailable: true, presentedQuestion: null });
   });
 
   it("returns the selected queue card, learning summary, and progress", async () => {
@@ -40,6 +42,6 @@ describe("GET /api/review/next", () => {
 
     const response = await GET(request("initial"));
 
-    expect(await response.json()).toEqual({ card, learning: summary, pending: 3, progress: review.result.progress, presentedQuestion: "变体：什么是间隔复习？" });
+    expect(await response.json()).toEqual({ card, learning: summary, pending: 3, progress: review.result.progress, extraInitialStudyAvailable: true, presentedQuestion: "变体：什么是间隔复习？" });
   });
 });

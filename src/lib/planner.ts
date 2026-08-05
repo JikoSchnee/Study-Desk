@@ -52,6 +52,37 @@ export function restartDailyPlan(date = todayShanghai()) {
   return ensureDailyPlan(date);
 }
 
+function nextExtraInitialStudyCard(date: string) {
+  const assignedCardIds = new Set(listDailyTasks(date).map((task) => task.cardId).filter(Boolean));
+  return listCards()
+    .filter((item) => item.status === "learning" && !assignedCardIds.has(item.id))
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))[0] ?? null;
+}
+
+export function hasExtraInitialStudy(date = todayShanghai()) {
+  ensureDailyPlan(date);
+  return Boolean(nextExtraInitialStudyCard(date));
+}
+
+/** Adds one unplanned new card to today's first-study plan without changing the daily target. */
+export function addExtraInitialStudy(date = todayShanghai()) {
+  ensureDailyPlan(date);
+  const card = nextExtraInitialStudyCard(date);
+  if (!card) return null;
+
+  const now = new Date().toISOString();
+  const id = randomUUID();
+  sqlite.transaction(() => {
+    sqlite.prepare("INSERT INTO daily_tasks (id, plan_date, kind, title, card_id, estimate_minutes, status, created_at) VALUES (?, ?, 'learn', ?, ?, 5, 'todo', ?)")
+      .run(id, date, `学习：${card.question}`, card.id, now);
+    // A finished report is a snapshot of every planned task. Adding one means
+    // it must wait until the new task is completed before being shown again.
+    sqlite.prepare("DELETE FROM daily_report_items WHERE report_date = ?").run(date);
+    sqlite.prepare("DELETE FROM daily_reports WHERE report_date = ?").run(date);
+  })();
+  return listDailyTasks(date).find((task) => task.id === id) ?? null;
+}
+
 export function listDailyTasks(date = todayShanghai()) {
   return (sqlite.prepare("SELECT * FROM daily_tasks WHERE plan_date = ? ORDER BY CASE kind WHEN 'review' THEN 1 WHEN 'learn' THEN 2 WHEN 'interview' THEN 3 ELSE 4 END").all(date) as Record<string, unknown>[]).map(rowToTask);
 }

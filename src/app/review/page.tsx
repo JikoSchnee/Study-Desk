@@ -68,6 +68,9 @@ function ReviewPageContent() {
   const [fullEditorOpen, setFullEditorOpen] = usePageState("review:full-editor-open", false);
   const [tagExpansion, setTagExpansion] = usePageState<Record<string, boolean>>("review:tag-expansion", {});
   const [learningChatOpen, setLearningChatOpen] = usePageState<boolean | null>("review:learning-chat-open", null);
+  const [extraStudyAvailable, setExtraStudyAvailable] = usePageState("review:extra-study-available", false);
+  const [extraStudyBusy, setExtraStudyBusy] = usePageState("review:extra-study-busy", false);
+  const [extraStudyNotice, setExtraStudyNotice] = usePageState("review:extra-study-notice", "");
   const studySaveTimers = useRef<Record<string, number>>({});
   const studyEditsDirty = useRef(false);
   const studyEditsVersion = useRef(0);
@@ -80,9 +83,9 @@ function ReviewPageContent() {
   useEffect(() => {
     if (!window.sessionStorage.getItem("mock-interview:plan-restarted")) return;
     window.sessionStorage.removeItem("mock-interview:plan-restarted");
-    ["review:session", "review:card", "review:learning", "review:progress", "review:presented-question", "review:answer", "review:evaluation", "review:evaluation-id", "review:busy", "review:active-hint", "review:revealed-points", "review:study-busy", "review:study-error"].forEach((key) => pageStateCache.delete(key));
-    setSession(null); setCard(null); setLearning(null); setProgress(null); setPresentedQuestion(""); setAnswer(""); setEvaluation(null); setEvaluationId(null); setBusy(false); setActiveHint(null); setRevealedStudyPoints([]); setStudyBusy(false); setStudyError("");
-  }, [pageStateCache, setActiveHint, setAnswer, setBusy, setCard, setEvaluation, setEvaluationId, setLearning, setPresentedQuestion, setProgress, setRevealedStudyPoints, setSession, setStudyBusy, setStudyError]);
+    ["review:session", "review:card", "review:learning", "review:progress", "review:presented-question", "review:answer", "review:evaluation", "review:evaluation-id", "review:busy", "review:active-hint", "review:revealed-points", "review:study-busy", "review:study-error", "review:extra-study-available", "review:extra-study-busy", "review:extra-study-notice"].forEach((key) => pageStateCache.delete(key));
+    setSession(null); setCard(null); setLearning(null); setProgress(null); setPresentedQuestion(""); setAnswer(""); setEvaluation(null); setEvaluationId(null); setBusy(false); setActiveHint(null); setRevealedStudyPoints([]); setStudyBusy(false); setStudyError(""); setExtraStudyAvailable(false); setExtraStudyBusy(false); setExtraStudyNotice("");
+  }, [pageStateCache, setActiveHint, setAnswer, setBusy, setCard, setEvaluation, setEvaluationId, setExtraStudyAvailable, setExtraStudyBusy, setExtraStudyNotice, setLearning, setPresentedQuestion, setProgress, setRevealedStudyPoints, setSession, setStudyBusy, setStudyError]);
 
   useEffect(() => () => { if (learningChatAnimationTimer.current !== null) window.clearTimeout(learningChatAnimationTimer.current); }, []);
 
@@ -91,7 +94,8 @@ function ReviewPageContent() {
     if (!response.ok) throw new Error("无法读取练习队列");
     const data = await response.json();
     setProgress(data.progress);
-  }, [setProgress]);
+    setExtraStudyAvailable(Boolean(data.extraInitialStudyAvailable));
+  }, [setExtraStudyAvailable, setProgress]);
 
   useEffect(() => {
     void loadQueueProgress().catch(() => setProgress({ initial: { pending: 0, completedToday: 0 }, review: { pending: 0, completedToday: 0 }, weak: { pending: 0, completedToday: 0 } }));
@@ -132,12 +136,12 @@ function ReviewPageContent() {
       setCard(data.card ?? null);
       setLearning(data.learning ?? null);
       setPresentedQuestion(data.presentedQuestion ?? data.card?.question ?? "");
-      if (nextSession !== "random") setProgress(data.progress);
+      if (nextSession !== "random") { setProgress(data.progress); setExtraStudyAvailable(Boolean(data.extraInitialStudyAvailable)); }
       if (nextSession === "random" && data.card?.id) setSeenRandomIds((ids) => ids.includes(data.card.id) ? ids : [...ids, data.card.id]);
     } catch {
       setCard(null);
     }
-  }, [setActiveHint, setAnswer, setCard, setEvaluation, setEvaluationId, setFeedbackNotice, setFollowUpAnswer, setFollowUpDraftBusy, setFollowUpFeedback, setFollowUpQuestion, setLearning, setPresentedQuestion, setProgress, setRevealedStudyPoints, setSeenRandomIds, setSession, setStudyBusy, setStudyError]);
+  }, [setActiveHint, setAnswer, setCard, setEvaluation, setEvaluationId, setExtraStudyAvailable, setFeedbackNotice, setFollowUpAnswer, setFollowUpDraftBusy, setFollowUpFeedback, setFollowUpQuestion, setLearning, setPresentedQuestion, setProgress, setRevealedStudyPoints, setSeenRandomIds, setSession, setStudyBusy, setStudyError]);
 
   useEffect(() => {
     if (targetQueue !== "initial" && targetQueue !== "review" && targetQueue !== "weak") return;
@@ -225,6 +229,17 @@ function ReviewPageContent() {
 
   const startQueue = useCallback((kind: QueueKind) => { void loadSession(kind); }, [loadSession]);
   const loadRandom = useCallback(() => void loadSession("random", seenRandomIds), [loadSession, seenRandomIds]);
+  const addExtraStudy = useCallback(async () => {
+    setExtraStudyBusy(true); setExtraStudyNotice("");
+    try {
+      const response = await fetch("/api/planner/extra-study", { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "无法加入加练题。");
+      if (!data.task?.cardId) { setExtraStudyAvailable(false); setExtraStudyNotice("没有可加练的新题了。"); return; }
+      await loadSession("initial", [], data.task.cardId);
+    } catch (error) { setExtraStudyNotice(error instanceof Error ? error.message : "无法加入加练题。"); }
+    finally { setExtraStudyBusy(false); }
+  }, [loadSession, setExtraStudyAvailable, setExtraStudyBusy, setExtraStudyNotice]);
   const leaveSession = useCallback(() => { setSession(null); setCard(null); setEvaluation(null); void loadQueueProgress(); }, [loadQueueProgress, setCard, setEvaluation, setSession]);
 
   const saveCurrentStudyEdits = useCallback(async () => {
@@ -312,7 +327,8 @@ function ReviewPageContent() {
     const other = session === "initial" ? "review" : session === "review" ? "initial" : null;
     const otherStats = other ? progress?.[other] ?? { pending: 0, completedToday: 0 } : { pending: 0, completedToday: 0 };
     const copy = queueCopy[session];
-    return <PageLayout><PageHeader eyebrow={<><BookOpenCheck size={15}/> {copy.label}</>} title={`${copy.label}已完成。`} description={`${progress ? `${progressText(progress[session])}。` : ""}${other && otherStats.pending ? ` 接下来还有 ${otherStats.pending} 道${queueCopy[other].label}。` : " 今天的练习告一段落。"}`} tour="review" actions={<Button variant="secondary" onClick={leaveSession}>退出</Button>} /><EmptyState title={other && otherStats.pending ? "继续下一类练习" : "今天的练习告一段落"} detail={other && otherStats.pending ? `确认后进入${queueCopy[other].label}，进度会继续累计。` : "明天再来复习，记忆会更牢。"} action={other && otherStats.pending ? <Button onClick={() => startQueue(other)}>继续{queueCopy[other].label}<ArrowRight size={17}/></Button> : <Link href="/library"><Button>查看题库</Button></Link>} /></PageLayout>;
+    const canAddExtraStudy = session === "initial";
+    return <PageLayout><PageHeader eyebrow={<><BookOpenCheck size={15}/> {copy.label}</>} title={`${copy.label}已完成。`} description={`${progress ? `${progressText(progress[session])}。` : ""}${other && otherStats.pending ? ` 接下来还有 ${otherStats.pending} 道${queueCopy[other].label}。` : " 今天的练习告一段落。"}`} tour="review" actions={<Button variant="secondary" onClick={leaveSession}>退出</Button>} /><EmptyState title={other && otherStats.pending ? "继续下一类练习" : "今天的练习告一段落"} detail={canAddExtraStudy ? extraStudyAvailable ? "今日计划已完成，还可以加练一题新题。" : "没有可加练的新题了。" : other && otherStats.pending ? `确认后进入${queueCopy[other].label}，进度会继续累计。` : "明天再来复习，记忆会更牢。"} action={<div className="form-actions">{other && otherStats.pending ? <Button onClick={() => startQueue(other)}>继续{queueCopy[other].label}<ArrowRight size={17}/></Button> : <Link href="/library"><Button variant={canAddExtraStudy ? "ghost" : "primary"}>查看题库</Button></Link>}{canAddExtraStudy && <Button disabled={!extraStudyAvailable || extraStudyBusy} onClick={() => void addExtraStudy()}>{extraStudyBusy ? "正在加入…" : "加练 1 题"}</Button>}{extraStudyNotice && <span className="danger" role="alert">{extraStudyNotice}</span>}</div>} /></PageLayout>;
   }
 
   const queue = session as SessionKind;
