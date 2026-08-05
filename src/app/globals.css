@@ -81,7 +81,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   font-size: 21px;
   font-weight: 900;
 }
-.brand b { font-size: 18px; }
+.brand > div { display: grid; gap: 1px; }.brand b { font-size: 18px; line-height: 1.15; }.brand small { color: #9a9a9a; font-size: 10px; font-weight: 800; letter-spacing: .1px; }
 .side-nav nav { display: grid; gap: 5px; }
 .nav-item {
   display: flex;

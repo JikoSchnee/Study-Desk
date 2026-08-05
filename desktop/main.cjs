@@ -175,7 +175,7 @@ function createWindow() {
     show: false,
     frame: process.platform !== "win32",
     backgroundColor: "#ffffff",
-    title: "八股训练台",
+    title: "Study Desk",
     // Match the compact desktop layout users get after zooming out twice.
     webPreferences: { preload: path.join(__dirname, "preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: false, zoomFactor: 0.8 },
   });

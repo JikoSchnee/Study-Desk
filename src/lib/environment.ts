@@ -69,7 +69,7 @@ function renderEnvironment(content: string, values: EnvironmentValues) {
     return !match || !managedKeys.includes(match[1] as ManagedKey);
   }).join("\n").trimEnd();
   const entries = managedKeys.flatMap((key) => values[key] ? [`${key}=${JSON.stringify(values[key])}`] : []);
-  const prefix = preserved || "# Local model settings for 八股训练台";
+  const prefix = preserved || "# Local model settings for Study Desk";
   return `${prefix}\n${entries.join("\n")}\n`;
 }
 

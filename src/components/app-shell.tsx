@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { BookOpenCheck, ClipboardList, LibraryBig, Maximize2, Minimize2, Settings, Square, X } from "lucide-react";
 import { SemanticModelPrewarm } from "@/components/semantic-model-prewarm";
 import { DesktopUpdatePrompt } from "@/components/desktop-update-notice";
+import { version as appVersion } from "../../package.json";
 
 const nav = [
   ["/", "今日", ClipboardList],
@@ -46,7 +47,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </div>
     </header>}
     <aside className="side-nav" aria-label="主导航">
-      <Link href="/" className="brand"><span>八</span><b>八股训练台</b></Link>
+      <Link href="/" className="brand"><span>S</span><div><b>Study Desk</b><small>v{appVersion}</small></div></Link>
       <nav>{nav.map(([href, label, Icon]) => <Link key={href} href={href} data-tour={tourTargetForNav(href)} className={pathname === href ? "nav-item active" : "nav-item"}><Icon size={20} /><span>{label}</span></Link>)}</nav>
       <p className="nav-note">每天把一个知识点，练成一句能说清的话。</p>
     </aside>
