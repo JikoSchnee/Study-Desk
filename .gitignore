@@ -11,3 +11,4 @@ data/*.db-*
 test-results
 playwright-report
 *.tsbuildinfo
+.DS_Store
