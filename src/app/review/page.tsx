@@ -46,6 +46,7 @@ function ReviewPageContent() {
   const [presentedQuestion, setPresentedQuestion] = usePageState("review:presented-question", "");
   const [answer, setAnswer] = usePageState("review:answer", "");
   const [evaluation, setEvaluation] = usePageState<Evaluation | null>("review:evaluation", null);
+  const [evaluationId, setEvaluationId] = usePageState<string | null>("review:evaluation-id", null);
   const [busy, setBusy] = usePageState("review:busy", false);
   const [activeHint, setActiveHint] = usePageState<number | null>("review:active-hint", null);
   const [seenRandomIds, setSeenRandomIds] = usePageState<string[]>("review:seen-random", []);
@@ -67,6 +68,8 @@ function ReviewPageContent() {
   const [tagExpansion, setTagExpansion] = usePageState<Record<string, boolean>>("review:tag-expansion", {});
   const [learningChatOpen, setLearningChatOpen] = usePageState<boolean | null>("review:learning-chat-open", null);
   const studySaveTimers = useRef<Record<string, number>>({});
+  const studyEditsDirty = useRef(false);
+  const studyEditsVersion = useRef(0);
   const launchedQueueTarget = useRef<string | null>(null);
   const reviewCardRef = useRef<HTMLElement | null>(null);
   const learningChatRef = useRef<HTMLElement | null>(null);
@@ -97,6 +100,7 @@ function ReviewPageContent() {
     setLearning(null);
     setAnswer("");
     setEvaluation(null);
+    setEvaluationId(null);
     setFeedbackNotice("");
     setFollowUpQuestion("");
     setFollowUpAnswer("");
@@ -107,6 +111,8 @@ function ReviewPageContent() {
     setRevealedStudyPoints([]);
     setStudyBusy(false);
     setStudyError("");
+    studyEditsDirty.current = false;
+    studyEditsVersion.current += 1;
     const query = nextSession === "random"
       ? (excludedIds.length ? `?${excludedIds.map((id) => `exclude=${encodeURIComponent(id)}`).join("&")}` : "")
       : `?queue=${nextSession}${requestedCardId ? `&cardId=${encodeURIComponent(requestedCardId)}` : ""}`;
@@ -123,7 +129,7 @@ function ReviewPageContent() {
     } catch {
       setCard(null);
     }
-  }, [setActiveHint, setAnswer, setCard, setEvaluation, setFeedbackNotice, setFollowUpAnswer, setFollowUpDraftBusy, setFollowUpFeedback, setFollowUpQuestion, setLearning, setPresentedQuestion, setProgress, setRevealedStudyPoints, setSeenRandomIds, setSession, setStudyBusy, setStudyError]);
+  }, [setActiveHint, setAnswer, setCard, setEvaluation, setEvaluationId, setFeedbackNotice, setFollowUpAnswer, setFollowUpDraftBusy, setFollowUpFeedback, setFollowUpQuestion, setLearning, setPresentedQuestion, setProgress, setRevealedStudyPoints, setSeenRandomIds, setSession, setStudyBusy, setStudyError]);
 
   useEffect(() => {
     if (targetQueue !== "initial" && targetQueue !== "review" && targetQueue !== "weak") return;
@@ -215,12 +221,14 @@ function ReviewPageContent() {
 
   const saveCurrentStudyEdits = useCallback(async () => {
     if (!card) return;
+    const version = studyEditsVersion.current;
     Object.values(studySaveTimers.current).forEach((timer) => window.clearTimeout(timer));
     studySaveTimers.current = {};
     const response = await fetch("/api/cards", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: card.id, question: card.question, questionVariants: card.questionVariants, relations: card.relations, answerPoints: card.answerPoints, note: card.note, track: card.track, tags: card.tags, difficulty: card.difficulty, source: card.source ?? "" }) });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error ?? "无法保存当前批注和提示。");
     setCard(data.card);
+    if (studyEditsVersion.current === version) studyEditsDirty.current = false;
   }, [card, setCard]);
 
   const completeStudy = useCallback(async (): Promise<string | void> => {
@@ -228,7 +236,7 @@ function ReviewPageContent() {
     if (revealedStudyPoints.length < card.answerPoints.length) return "请先看完全部要点。";
     setStudyBusy(true); setStudyError("");
     try {
-      await saveCurrentStudyEdits();
+      if (studyEditsDirty.current) await saveCurrentStudyEdits();
       const response = await fetch("/api/review/study", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cardId: card.id }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "无法完成首次学习。");
@@ -244,12 +252,12 @@ function ReviewPageContent() {
     if (!card || !answer.trim()) return "请先写一段自己的回答，下一步会用同一个提交操作生成报告。";
     setBusy(true); setSubmitError("");
     try {
-      const result = await semanticProgress.request<{ evaluation?: Evaluation }>("/api/review/submit", { action: "evaluate", cardId: card.id, presentedQuestion, answer, comparisonMode }, comparisonMode === "embedding");
-      if (result.evaluation) setEvaluation(result.evaluation);
+      const result = await semanticProgress.request<{ evaluation?: Evaluation; evaluationId?: string }>("/api/review/submit", { action: "evaluate", cardId: card.id, presentedQuestion, answer, comparisonMode }, comparisonMode === "embedding");
+      if (result.evaluation && result.evaluationId) { setEvaluation(result.evaluation); setEvaluationId(result.evaluationId); }
       else { const message = "未收到评估结果，请重试。"; setSubmitError(message); return message; }
     } catch { const message = "提交失败，答案已保留。请检查网络后重试。"; setSubmitError(message); return message; }
     finally { setBusy(false); }
-  }, [answer, card, comparisonMode, presentedQuestion, semanticProgress, setBusy, setEvaluation, setSubmitError]);
+  }, [answer, card, comparisonMode, presentedQuestion, semanticProgress, setBusy, setEvaluation, setEvaluationId, setSubmitError]);
 
   const confirm = useCallback(async (rating: RatingName): Promise<string | void> => {
     if (!card || !session || session === "random") return "当前题目无法确认评级。";
@@ -260,13 +268,13 @@ function ReviewPageContent() {
     }
     setBusy(true);
     try {
-      const result = await semanticProgress.request<{ error?: string }>("/api/review/submit", { action: "confirm", cardId: card.id, presentedQuestion, answer, rating, comparisonMode }, comparisonMode === "embedding");
-      if (result.error) return result.error;
+      const result = await semanticProgress.request<{ error?: string; evaluationExpired?: boolean }>("/api/review/submit", { action: "confirm", cardId: card.id, presentedQuestion, answer, rating, comparisonMode, evaluationId }, false);
+      if (result.error) { if (result.evaluationExpired) { setEvaluation(null); setEvaluationId(null); } return result.error; }
       window.localStorage.removeItem(`mock-interview:draft:${session}:${card.id}`);
       await loadSession(session);
     } catch { return "评级提交失败，请检查网络后重试。"; }
     finally { setBusy(false); }
-  }, [actOnFeedback, answer, card, comparisonMode, loadSession, presentedQuestion, semanticProgress, session, setBusy]);
+  }, [actOnFeedback, answer, card, comparisonMode, evaluationId, loadSession, presentedQuestion, semanticProgress, session, setBusy, setEvaluation, setEvaluationId]);
 
   if (!progress && session === null) return <div className="loading">正在准备今天的练习…</div>;
 
@@ -351,6 +359,8 @@ function ReviewPageContent() {
   const revealStudyPoint = (index: number) => setRevealedStudyPoints((current) => current.includes(index) ? current : [...current, index]);
   const updateStudyPoint = (pointId: string, field: "note" | "hint", value: string) => {
     if (!card) return;
+    studyEditsDirty.current = true;
+    const version = ++studyEditsVersion.current;
     const updated = { ...card, answerPoints: card.answerPoints.map((point) => point.id === pointId ? { ...point, [field]: value } : point) };
     setCard(updated);
     setStudyEditErrors((errors) => ({ ...errors, [pointId]: "" }));
@@ -361,6 +371,7 @@ function ReviewPageContent() {
           const data = await response.json();
           if (!response.ok) throw new Error(data.error ?? "无法保存修改。");
           setCard(data.card);
+          if (studyEditsVersion.current === version) studyEditsDirty.current = false;
         })
         .catch((error) => setStudyEditErrors((errors) => ({ ...errors, [pointId]: error instanceof Error ? error.message : "保存失败，请重试。" })));
     }, 450);
