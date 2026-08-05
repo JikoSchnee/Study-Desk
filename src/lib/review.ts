@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { sqlite } from "@/lib/db";
 import { getCard, listCards, updateCardStatus } from "@/lib/cards";
 import { nextShanghaiMorning, todayShanghai } from "@/lib/utils";
-import { completeTodayTaskForCard } from "@/lib/planner";
+import { completeTodayTaskForCard, ensureDailyPlan, listDailyTasks } from "@/lib/planner";
 import { clearPriorityPractice, focusedCards, isPriorityPractice } from "@/lib/practice-focus";
 import { refreshDailyLearningReport } from "@/lib/daily-reports";
 import type { AnswerComparison, Card, RatingName } from "@/lib/types";
@@ -84,29 +84,36 @@ export function dueCards() {
   return rows.map((row) => getCard(row.id)).filter((card): card is Card => Boolean(card));
 }
 
+/** The guided queues follow today's generated plan; free practice remains separate. */
+function plannedCards(kind: "initial" | "review") {
+  const date = todayShanghai();
+  ensureDailyPlan(date);
+  const taskKind = kind === "initial" ? "learn" : "review";
+  const taskIds = listDailyTasks(date)
+    .filter((task) => task.kind === taskKind && task.status === "todo" && task.cardId)
+    .map((task) => task.cardId!);
+  const cards = new Map(listCards().map((card) => [card.id, card]));
+  return taskIds.map((id) => cards.get(id)).filter((card): card is Card => Boolean(card));
+}
+
 export function reviewQueueProgress(): ReviewQueueProgress {
-  const initial = sqlite.prepare("SELECT COUNT(*) AS count FROM cards WHERE status = 'learning'").get() as { count: number };
-  const review = sqlite.prepare("SELECT COUNT(*) AS count FROM cards c JOIN review_state r ON r.card_id = c.id WHERE c.status = 'review' AND r.due_at <= ?").get(new Date().toISOString()) as { count: number };
+  const date = todayShanghai();
+  ensureDailyPlan(date);
+  const tasks = listDailyTasks(date);
+  const progressFor = (kind: "learn" | "review") => ({
+    pending: tasks.filter((task) => task.kind === kind && task.status === "todo").length,
+    completedToday: tasks.filter((task) => task.kind === kind && task.status === "done").length,
+  });
   const weak = focusedCards("weak").length;
-  // The session progress mirrors today's restartable plan, rather than all
-  // historical activity recorded since midnight. A plan restart can therefore
-  // genuinely reset the displayed progress without deleting learning history.
-  const completed = sqlite.prepare(`
-    SELECT
-      COALESCE(SUM(CASE WHEN kind = 'learn' AND status = 'done' THEN 1 ELSE 0 END), 0) AS initial_count,
-      COALESCE(SUM(CASE WHEN kind = 'review' AND status = 'done' THEN 1 ELSE 0 END), 0) AS review_count
-    FROM daily_tasks
-    WHERE plan_date = ?
-  `).get(todayShanghai()) as { initial_count: number; review_count: number };
   return {
-    initial: { pending: Number(initial.count), completedToday: Number(completed.initial_count) },
-    review: { pending: Number(review.count), completedToday: Number(completed.review_count) },
+    initial: progressFor("learn"),
+    review: progressFor("review"),
     weak: { pending: weak, completedToday: 0 },
   };
 }
 
 export function nextReviewCard(kind: ReviewQueueKind, requestedCardId?: string | null) {
-  const base = kind === "initial" ? initialCards() : kind === "review" ? dueCards() : focusedCards("weak");
+  const base = kind === "initial" || kind === "review" ? plannedCards(kind) : focusedCards("weak");
   const cards = kind === "weak" ? base : [...base.filter((card) => isPriorityPractice(card.id)), ...base.filter((card) => !isPriorityPractice(card.id))];
   return { card: (requestedCardId ? cards.find((card) => card.id === requestedCardId) : undefined) ?? cards[0] ?? null, pending: cards.length, progress: reviewQueueProgress() };
 }

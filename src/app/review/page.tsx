@@ -13,7 +13,7 @@ import { SemanticComparisonProgress } from "@/components/semantic-comparison-pro
 import { useSemanticComparisonProgress } from "@/components/use-semantic-comparison-progress";
 import { difficultyTier } from "@/lib/card-filters";
 import { answerPointLabels } from "@/lib/import";
-import { usePageState } from "@/components/page-state-cache";
+import { usePageState, usePageStateCache } from "@/components/page-state-cache";
 import { ReviewCardEditorDialog } from "@/components/review-card-editor-dialog";
 import { ReviewLearningChat } from "@/components/review-learning-chat";
 import type { AnswerComparisonMode, Card, CardLearningSummary, Evaluation, RatingName } from "@/lib/types";
@@ -36,6 +36,7 @@ function progressText(stats: { pending: number; completedToday: number }) {
 
 function ReviewPageContent() {
   const router = useRouter();
+  const pageStateCache = usePageStateCache();
   const searchParams = useSearchParams();
   const targetQueue = searchParams.get("queue");
   const targetCardId = searchParams.get("cardId");
@@ -75,6 +76,13 @@ function ReviewPageContent() {
   const learningChatRef = useRef<HTMLElement | null>(null);
   const learningChatAnimationTimer = useRef<number | null>(null);
   const semanticProgress = useSemanticComparisonProgress();
+
+  useEffect(() => {
+    if (!window.sessionStorage.getItem("mock-interview:plan-restarted")) return;
+    window.sessionStorage.removeItem("mock-interview:plan-restarted");
+    ["review:session", "review:card", "review:learning", "review:progress", "review:presented-question", "review:answer", "review:evaluation", "review:evaluation-id", "review:busy", "review:active-hint", "review:revealed-points", "review:study-busy", "review:study-error"].forEach((key) => pageStateCache.delete(key));
+    setSession(null); setCard(null); setLearning(null); setProgress(null); setPresentedQuestion(""); setAnswer(""); setEvaluation(null); setEvaluationId(null); setBusy(false); setActiveHint(null); setRevealedStudyPoints([]); setStudyBusy(false); setStudyError("");
+  }, [pageStateCache, setActiveHint, setAnswer, setBusy, setCard, setEvaluation, setEvaluationId, setLearning, setPresentedQuestion, setProgress, setRevealedStudyPoints, setSession, setStudyBusy, setStudyError]);
 
   useEffect(() => () => { if (learningChatAnimationTimer.current !== null) window.clearTimeout(learningChatAnimationTimer.current); }, []);
 

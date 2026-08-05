@@ -12,9 +12,13 @@ const database = vi.hoisted(() => ({
 const cards = vi.hoisted(() => ({
   rows: [
     { id: "learning-card", question: "新题", status: "learning", createdAt: "2026-01-01T00:00:00.000Z" },
+    { id: "unscheduled-learning-card", question: "计划外新题", status: "learning", createdAt: "2026-01-01T01:00:00.000Z" },
     { id: "review-card", question: "旧题", status: "review", createdAt: "2026-01-02T00:00:00.000Z" },
   ] as Array<{ id: string; question: string; status: string; createdAt: string }>,
   statusUpdates: [] as Array<{ id: string; status: string }>,
+}));
+const planner = vi.hoisted(() => ({
+  tasks: [{ id: "planned-learning", kind: "learn", cardId: "learning-card", status: "todo" }],
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -55,6 +59,12 @@ vi.mock("@/lib/cards", () => ({
   updateCardStatus: (id: string, status: string) => { cards.statusUpdates.push({ id, status }); },
 }));
 
+vi.mock("@/lib/planner", () => ({
+  completeTodayTaskForCard: () => undefined,
+  ensureDailyPlan: () => planner.tasks,
+  listDailyTasks: () => planner.tasks,
+}));
+
 import { completeInitialStudy, dueCards, initialCards, nextReviewCard, submitReview } from "@/lib/review";
 
 beforeEach(() => {
@@ -66,6 +76,7 @@ beforeEach(() => {
   database.hasInitialStudy = false;
   database.hasRealPractice = false;
   cards.statusUpdates.length = 0;
+  planner.tasks = [{ id: "planned-learning", kind: "learn", cardId: "learning-card", status: "todo" }];
 });
 
 describe("first practice", () => {
@@ -113,7 +124,7 @@ describe("first practice", () => {
 
 describe("review queues", () => {
   it("keeps new cards in the initial-study queue", () => {
-    expect(initialCards().map((card) => card.id)).toEqual(["learning-card"]);
+    expect(initialCards().map((card) => card.id)).toEqual(["learning-card", "unscheduled-learning-card"]);
   });
 
   it("uses due time and card ID for a stable review order", () => {
@@ -123,8 +134,19 @@ describe("review queues", () => {
     expect(database.queries.find((sql) => sql.includes("FROM cards c JOIN review_state"))).toContain("ORDER BY r.due_at ASC, c.id ASC");
   });
 
-  it("returns queue progress with the next initial-study card", () => {
+  it("returns only the card assigned to today's initial-study plan", () => {
     expect(nextReviewCard("initial").card?.id).toBe("learning-card");
     expect(nextReviewCard("initial").progress).toEqual({ initial: { pending: 1, completedToday: 0 }, review: { pending: 0, completedToday: 0 }, weak: { pending: 0, completedToday: 0 } });
+  });
+
+  it("uses the matching planned review card and preserves completed task progress", () => {
+    planner.tasks = [
+      { id: "finished-learning", kind: "learn", cardId: "learning-card", status: "done" },
+      { id: "planned-review", kind: "review", cardId: "review-card", status: "todo" },
+    ];
+
+    expect(nextReviewCard("initial").card).toBeNull();
+    expect(nextReviewCard("review").card?.id).toBe("review-card");
+    expect(nextReviewCard("review").progress).toEqual({ initial: { pending: 0, completedToday: 1 }, review: { pending: 1, completedToday: 0 }, weak: { pending: 0, completedToday: 0 } });
   });
 });
