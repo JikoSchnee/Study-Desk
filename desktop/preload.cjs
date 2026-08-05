@@ -16,6 +16,9 @@ contextBridge.exposeInMainWorld("mockInterviewDesktop", {
   updates: {
     check: () => ipcRenderer.invoke("updates:check"),
   },
+  network: {
+    diagnostics: () => ipcRenderer.invoke("network:diagnostics"),
+  },
   server: {
     onStatus: (listener) => {
       const failed = (_event, message) => listener({ state: "error", message });

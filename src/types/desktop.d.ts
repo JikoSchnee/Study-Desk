@@ -5,6 +5,21 @@ type ManualUpdateStatus =
   | { state: "available"; currentVersion: string; latestVersion: string; url: string; releaseNotes: string }
   | { state: "error"; currentVersion: string; message: string; url?: string };
 
+type DesktopNetworkCheck = {
+  id: "network" | "github" | "huggingface";
+  label: string;
+  ok: boolean;
+  status?: number;
+  durationMs: number;
+  failureKind?: "timeout" | "dns" | "tls" | "proxy" | "connection" | "http" | "unknown";
+  detail: string;
+};
+
+type DesktopNetworkDiagnostics = {
+  layer: { id: "electron"; label: string; transport: string; checks: DesktopNetworkCheck[] };
+  guidance?: string;
+};
+
 declare global {
   interface Window {
     mockInterviewDesktop?: {
@@ -18,6 +33,9 @@ declare global {
       };
       updates: {
         check(): Promise<ManualUpdateStatus>;
+      };
+      network: {
+        diagnostics(): Promise<DesktopNetworkDiagnostics>;
       };
       server: {
         onStatus(listener: (status: { state: "ready" } | { state: "error"; message: string }) => void): () => void;

@@ -17,3 +17,4 @@ buildSync({
 });
 
 cpSync(join(__dirname, "preload.cjs"), join(output, "preload.cjs"));
+cpSync(join(__dirname, "network-fetch.cjs"), join(output, "network-fetch.cjs"));

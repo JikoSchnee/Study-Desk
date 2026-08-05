@@ -1,7 +1,6 @@
-const { app, BrowserWindow, ipcMain, powerMonitor, session, utilityProcess } = require("electron");
+const { app, BrowserWindow, ipcMain, net: electronNet, powerMonitor, session, utilityProcess } = require("electron");
 const { existsSync } = require("node:fs");
 const http = require("node:http");
-const https = require("node:https");
 const net = require("node:net");
 const path = require("node:path");
 
@@ -11,26 +10,12 @@ let serverPort;
 let isQuitting = false;
 let isRestartingServer = false;
 const releasesUrl = "https://github.com/JikoSchnee/Study-Desk/releases";
-
-// The Next server runs in a utility process, where Node's fetch does not use
-// Chromium's Windows proxy/PAC configuration by default. Resolve the system
-// proxy once in Electron and pass it to Node's built-in proxy support instead.
-// This keeps diagnostics, AI requests, and model downloads on the same route
-// as the desktop window.
-async function networkEnvironment() {
-  try {
-    const rules = await session.defaultSession.resolveProxy("https://www.baidu.com/");
-    const rule = rules.split(";").map((value) => value.trim()).find((value) => /^(PROXY|HTTPS?)\s+/i.test(value));
-    if (!rule) return { NODE_USE_ENV_PROXY: "1" };
-    const address = rule.replace(/^(PROXY|HTTPS?)\s+/i, "").trim();
-    if (!address) return { NODE_USE_ENV_PROXY: "1" };
-    const proxy = `http://${address}`;
-    return { NODE_USE_ENV_PROXY: "1", HTTP_PROXY: proxy, HTTPS_PROXY: proxy };
-  } catch (error) {
-    console.warn("[network] could not resolve the system proxy; using direct connections.", error);
-    return { NODE_USE_ENV_PROXY: "1" };
-  }
-}
+const networkChecks = [
+  { id: "network", label: "基础网络", url: "https://www.baidu.com/" },
+  { id: "github", label: "GitHub", url: "https://raw.githubusercontent.com/JikoSchnee/Study-Desk/main/README.md" },
+  { id: "huggingface", label: "Hugging Face", url: "https://huggingface.co/" },
+];
+const networkTimeoutMs = 8_000;
 
 function userHome() { return path.join(app.getPath("userData"), "runtime"); }
 function sendMaximizeState() { mainWindow?.webContents.send("window:maximize-change", mainWindow?.isMaximized() ?? false); }
@@ -42,22 +27,52 @@ function compareVersions(left, right) {
   }
   return 0;
 }
-function fetchLatestRelease() {
-  return new Promise((resolve, reject) => {
-    const request = https.get("https://api.github.com/repos/JikoSchnee/Study-Desk/releases/latest", {
+async function fetchLatestRelease() {
+  try {
+    const response = await electronNet.fetch("https://api.github.com/repos/JikoSchnee/Study-Desk/releases/latest", {
       headers: { Accept: "application/vnd.github+json", "User-Agent": "Study-Desk" },
-    }, (response) => {
-      let body = "";
-      response.setEncoding("utf8");
-      response.on("data", (chunk) => { body += chunk; });
-      response.on("end", () => {
-        if (response.statusCode !== 200) return reject(new Error(`GitHub 返回了 ${response.statusCode ?? "未知"} 状态。`));
-        try { resolve(JSON.parse(body)); } catch { reject(new Error("无法读取 GitHub 的版本信息。")); }
-      });
+      signal: AbortSignal.timeout(10_000),
     });
-    request.setTimeout(10_000, () => request.destroy(new Error("无法连接 GitHub（10 秒超时）。请检查网络后重试，或直接前往 Releases 下载。")));
-    request.on("error", (error) => reject(new Error(`无法连接 GitHub：${error.message}。请检查网络后重试，或直接前往 Releases 下载。`)));
-  });
+    if (!response.ok) throw new Error(`GitHub 返回了 ${response.status} 状态。`);
+    return await response.json();
+  } catch (error) {
+    if (error instanceof Error && error.name === "TimeoutError") throw new Error("无法连接 GitHub（10 秒超时）。请检查网络后重试，或直接前往 Releases 下载。");
+    throw new Error(`无法连接 GitHub：${error instanceof Error ? error.message : "未知错误"}。请检查网络后重试，或直接前往 Releases 下载。`);
+  }
+}
+function failureKind(error, timedOut) {
+  if (timedOut) return ["timeout", `超过 ${networkTimeoutMs / 1_000} 秒未收到响应。`];
+  const message = error instanceof Error ? `${error.name} ${error.message}`.toUpperCase() : "";
+  if (message.includes("NAME_NOT_RESOLVED") || message.includes("ENOTFOUND")) return ["dns", "域名无法解析（DNS）。"];
+  if (message.includes("CERT") || message.includes("SSL")) return ["tls", "HTTPS 证书验证失败，可能被代理或安全软件拦截。"];
+  if (message.includes("PROXY") || message.includes("TUNNEL")) return ["proxy", "系统代理无法建立连接、认证或转发请求。"];
+  if (message.includes("CONNECTION") || message.includes("NETWORK") || message.includes("UNREACHABLE") || message.includes("TIMEDOUT")) return ["connection", "连接被拒绝、重置或网络不可达。"];
+  return ["unknown", "请求未能建立；可能受网络、代理或安全软件影响。"];
+}
+async function checkElectronNetwork({ id, label, url }) {
+  const startedAt = Date.now();
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, networkTimeoutMs);
+  try {
+    const response = await electronNet.fetch(url, { method: "GET", redirect: "manual", cache: "no-store", signal: controller.signal, headers: { "User-Agent": "Study-Desk network diagnostic", Accept: "text/html,application/json;q=0.9" } });
+    const durationMs = Date.now() - startedAt;
+    if (response.status >= 200 && response.status < 400) return { id, label, ok: true, status: response.status, durationMs, detail: `已连接（HTTP ${response.status}）。` };
+    return { id, label, ok: false, status: response.status, durationMs, failureKind: "http", detail: `网站返回 HTTP ${response.status}。网络已到达该网站，但请求被其服务拒绝或限制。` };
+  } catch (error) {
+    const [kind, detail] = failureKind(error, timedOut);
+    return { id, label, ok: false, durationMs: Date.now() - startedAt, failureKind: kind, detail };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+async function desktopNetworkDiagnostics() {
+  const checks = await Promise.all(networkChecks.map(checkElectronNetwork));
+  const allFailed = checks.every((check) => !check.ok);
+  return {
+    layer: { id: "electron", label: "Electron 系统网络", transport: "Chromium / Windows 系统代理", checks },
+    ...(allFailed ? { guidance: "Electron 系统网络也无法访问。请检查 Windows 防火墙、安全软件、系统代理或企业网络策略。" } : {}),
+  };
 }
 
 function findPort() {
@@ -107,8 +122,12 @@ async function startServer(port = null) {
     ? path.join(process.resourcesPath, "next", "server.js")
     : path.join(app.getAppPath(), ".next", "standalone", "server.js");
   if (!existsSync(serverPath)) throw new Error("未找到应用服务。请先执行 npm run desktop:build。");
+  const networkHookPath = path.join(__dirname, "network-fetch.cjs");
+  if (!existsSync(networkHookPath)) throw new Error("未找到桌面网络组件。请重新安装或重新打包应用。");
   serverProcess = utilityProcess.fork(serverPath, [], {
-    env: { ...process.env, ...await networkEnvironment(), PORT: String(serverPort), HOSTNAME: "127.0.0.1", MOCK_INTERVIEW_HOME: userHome(), NODE_ENV: "production" },
+    env: { ...process.env, PORT: String(serverPort), HOSTNAME: "127.0.0.1", MOCK_INTERVIEW_HOME: userHome(), NODE_ENV: "production" },
+    execArgv: ["--require", networkHookPath],
+    session: session.defaultSession,
     stdio: ["ignore", "ignore", "pipe"],
     serviceName: "Study Desk Server",
   });
@@ -170,6 +189,7 @@ ipcMain.handle("window:minimize", () => mainWindow?.minimize());
 ipcMain.handle("window:toggle-maximize", () => { if (mainWindow?.isMaximized()) mainWindow.unmaximize(); else mainWindow?.maximize(); });
 ipcMain.handle("window:close", () => mainWindow?.close());
 ipcMain.handle("window:is-maximized", () => mainWindow?.isMaximized() ?? false);
+ipcMain.handle("network:diagnostics", () => desktopNetworkDiagnostics());
 ipcMain.handle("updates:check", async () => {
   const currentVersion = app.getVersion();
   try {
