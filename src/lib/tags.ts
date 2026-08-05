@@ -1,7 +1,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { sqlite } from "@/lib/db";
-import { normalizeTags, parseTags, toTags } from "@/lib/utils";
+import { containsChineseCharacters, normalizeTags, parseTags, toTags } from "@/lib/utils";
 import type { Tag, TagDisplayLanguage } from "@/lib/types";
 
 type TagRow = { id: string; tag_key: string; chinese: string; english: string; created_at: string; updated_at: string; usage_count?: number };
@@ -34,11 +34,16 @@ export function resolveTagKeys(values: string[]) {
   migrateLegacyTags();
   const found = new Map((sqlite.prepare("SELECT * FROM tags").all() as TagRow[]).map((row) => [row.tag_key, map(row)]));
   const now = new Date().toISOString();
-  const add = sqlite.prepare("INSERT OR IGNORE INTO tags (id, tag_key, chinese, english, created_at, updated_at) VALUES (?, ?, ?, '', ?, ?)");
+  const add = sqlite.prepare("INSERT OR IGNORE INTO tags (id, tag_key, chinese, english, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)");
   return normalizeTags(values).map((value) => {
     const existing = found.get(keyFor(value));
     if (existing) return existing.key;
-    const key = keyFor(value); add.run(randomUUID(), key, value.trim(), now, now); return key;
+    const key = keyFor(value);
+    const label = value.trim();
+    const chinese = containsChineseCharacters(label) ? label : "";
+    const english = chinese ? "" : label;
+    add.run(randomUUID(), key, chinese, english, now, now);
+    return key;
   });
 }
 

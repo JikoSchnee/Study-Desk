@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { withTrackTag } from "./utils";
+import { containsChineseCharacters, withTrackTag } from "./utils";
 
 describe("withTrackTag", () => {
   it("adds the trimmed knowledge-base type while preserving manual tags", () => {
@@ -12,5 +12,12 @@ describe("withTrackTag", () => {
 
   it("retains an earlier type tag when the type changes", () => {
     expect(withTrackTag("Java 后端", ["Agent", "手动标签"])).toEqual(["Agent", "手动标签", "Java 后端"]);
+  });
+
+  it("recognizes simplified, traditional, and CJK extension Chinese characters", () => {
+    expect(containsChineseCharacters("检索")).toBe(true);
+    expect(containsChineseCharacters("繁體")).toBe(true);
+    expect(containsChineseCharacters("㐀")).toBe(true);
+    expect(containsChineseCharacters("RAG v2.0")).toBe(false);
   });
 });

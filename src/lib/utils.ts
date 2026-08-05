@@ -42,6 +42,11 @@ export function normalizeTags(value: string[]) {
   }, []);
 }
 
+/** Returns whether a label contains at least one CJK unified ideograph. */
+export function containsChineseCharacters(value: string) {
+  return /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/u.test(value);
+}
+
 /** Ensures a card can always be found through its current knowledge-base type. */
 export function withTrackTag(track: string, tags: string[]) {
   const normalizedTrack = track.trim();
