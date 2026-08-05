@@ -43,8 +43,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 }
 
 .app-frame { min-height: 100vh; display: grid; grid-template-columns: 256px minmax(0, 1fr); }
-.desktop-windows { grid-template-rows: 44px minmax(0, 1fr); }
-.windows-titlebar { position: sticky; z-index: 20; top: 0; display: grid; grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) auto; min-height: 44px; background: var(--snow); border-bottom: 2px solid var(--line); }
+.desktop-windows { height: 100vh; grid-template-rows: 44px minmax(0, 1fr); overflow: hidden; }
+.windows-titlebar { position: relative; z-index: 120; display: grid; grid-row: 1; grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) auto; min-height: 44px; background: var(--snow); border-bottom: 2px solid var(--line); }
 .windows-drag-region { min-width: 0; -webkit-app-region: drag; }
 .windows-controls { display: flex; align-items: center; gap: 7px; padding: 6px 10px 7px; -webkit-app-region: no-drag; }
 .window-control { display: grid; place-items: center; width: 32px; height: 30px; padding: 0 0 2px; border: 2px solid; border-bottom-width: 4px; border-radius: 10px; cursor: pointer; transition: background-color var(--motion), border-color var(--motion), color var(--motion), transform var(--motion); }
@@ -56,8 +56,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .window-control.maximize:hover { background: #ffda31; border-color: #ffda31; border-bottom-color: var(--bee-dark); }
 .window-control.close { color: #fff; background: var(--cardinal); border-color: var(--cardinal); border-bottom-color: var(--cardinal-dark); }
 .window-control.close:hover { background: #ff6565; border-color: #ff6565; border-bottom-color: var(--cardinal-dark); }
-.desktop-windows .side-nav { top: 44px; height: calc(100vh - 44px); }
-.desktop-windows .page-main { padding-top: 42px; }
+.desktop-windows .side-nav { grid-row: 2; top: auto; height: auto; }
+.desktop-windows .page-main { grid-row: 2; height: 100%; padding-top: 42px; overflow-y: auto; overscroll-behavior: contain; }
 .side-nav {
   display: flex;
   flex-direction: column;
