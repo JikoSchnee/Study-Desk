@@ -3,7 +3,7 @@ import { createEmptyCard, fsrs, generatorParameters, Rating } from "ts-fsrs";
 import { randomUUID } from "node:crypto";
 import { sqlite } from "@/lib/db";
 import { getCard, listCards, updateCardStatus } from "@/lib/cards";
-import { nextShanghaiMorning, shanghaiDayBounds } from "@/lib/utils";
+import { nextShanghaiMorning, todayShanghai } from "@/lib/utils";
 import { completeTodayTaskForCard } from "@/lib/planner";
 import { clearPriorityPractice, focusedCards, isPriorityPractice } from "@/lib/practice-focus";
 import { refreshDailyLearningReport } from "@/lib/daily-reports";
@@ -88,14 +88,16 @@ export function reviewQueueProgress(): ReviewQueueProgress {
   const initial = sqlite.prepare("SELECT COUNT(*) AS count FROM cards WHERE status = 'learning'").get() as { count: number };
   const review = sqlite.prepare("SELECT COUNT(*) AS count FROM cards c JOIN review_state r ON r.card_id = c.id WHERE c.status = 'review' AND r.due_at <= ?").get(new Date().toISOString()) as { count: number };
   const weak = focusedCards("weak").length;
-  const { start, end } = shanghaiDayBounds();
+  // The session progress mirrors today's restartable plan, rather than all
+  // historical activity recorded since midnight. A plan restart can therefore
+  // genuinely reset the displayed progress without deleting learning history.
   const completed = sqlite.prepare(`
     SELECT
-      (SELECT COUNT(*) FROM initial_study_logs WHERE completed_at >= ? AND completed_at < ?) AS initial_count,
-      COALESCE(SUM(CASE WHEN l.is_initial = 0 OR EXISTS (SELECT 1 FROM initial_study_logs s WHERE s.card_id = l.card_id) THEN 1 ELSE 0 END), 0) AS review_count
-    FROM review_logs l
-    WHERE created_at >= ? AND created_at < ?
-  `).get(start, end, start, end) as { initial_count: number; review_count: number };
+      COALESCE(SUM(CASE WHEN kind = 'learn' AND status = 'done' THEN 1 ELSE 0 END), 0) AS initial_count,
+      COALESCE(SUM(CASE WHEN kind = 'review' AND status = 'done' THEN 1 ELSE 0 END), 0) AS review_count
+    FROM daily_tasks
+    WHERE plan_date = ?
+  `).get(todayShanghai()) as { initial_count: number; review_count: number };
   return {
     initial: { pending: Number(initial.count), completedToday: Number(completed.initial_count) },
     review: { pending: Number(review.count), completedToday: Number(completed.review_count) },
