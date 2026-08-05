@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, powerMonitor, utilityProcess } = require("electron");
+const { app, BrowserWindow, ipcMain, powerMonitor, session, utilityProcess } = require("electron");
 const { existsSync } = require("node:fs");
 const http = require("node:http");
 const https = require("node:https");
@@ -11,6 +11,26 @@ let serverPort;
 let isQuitting = false;
 let isRestartingServer = false;
 const releasesUrl = "https://github.com/JikoSchnee/Study-Desk/releases";
+
+// The Next server runs in a utility process, where Node's fetch does not use
+// Chromium's Windows proxy/PAC configuration by default. Resolve the system
+// proxy once in Electron and pass it to Node's built-in proxy support instead.
+// This keeps diagnostics, AI requests, and model downloads on the same route
+// as the desktop window.
+async function networkEnvironment() {
+  try {
+    const rules = await session.defaultSession.resolveProxy("https://www.baidu.com/");
+    const rule = rules.split(";").map((value) => value.trim()).find((value) => /^(PROXY|HTTPS?)\s+/i.test(value));
+    if (!rule) return { NODE_USE_ENV_PROXY: "1" };
+    const address = rule.replace(/^(PROXY|HTTPS?)\s+/i, "").trim();
+    if (!address) return { NODE_USE_ENV_PROXY: "1" };
+    const proxy = `http://${address}`;
+    return { NODE_USE_ENV_PROXY: "1", HTTP_PROXY: proxy, HTTPS_PROXY: proxy };
+  } catch (error) {
+    console.warn("[network] could not resolve the system proxy; using direct connections.", error);
+    return { NODE_USE_ENV_PROXY: "1" };
+  }
+}
 
 function userHome() { return path.join(app.getPath("userData"), "runtime"); }
 function sendMaximizeState() { mainWindow?.webContents.send("window:maximize-change", mainWindow?.isMaximized() ?? false); }
@@ -88,7 +108,7 @@ async function startServer(port = null) {
     : path.join(app.getAppPath(), ".next", "standalone", "server.js");
   if (!existsSync(serverPath)) throw new Error("未找到应用服务。请先执行 npm run desktop:build。");
   serverProcess = utilityProcess.fork(serverPath, [], {
-    env: { ...process.env, PORT: String(serverPort), HOSTNAME: "127.0.0.1", MOCK_INTERVIEW_HOME: userHome(), NODE_ENV: "production" },
+    env: { ...process.env, ...await networkEnvironment(), PORT: String(serverPort), HOSTNAME: "127.0.0.1", MOCK_INTERVIEW_HOME: userHome(), NODE_ENV: "production" },
     stdio: ["ignore", "ignore", "pipe"],
     serviceName: "Study Desk Server",
   });
