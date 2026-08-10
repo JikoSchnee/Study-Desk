@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { BookOpenCheck, ClipboardList, LibraryBig, Maximize2, Minimize2, Settings, Square, X } from "lucide-react";
+import { BookOpenCheck, ClipboardList, Cloud, CloudAlert, CloudOff, LibraryBig, Maximize2, Minimize2, Settings, Square, X } from "lucide-react";
 import { SemanticModelPrewarm } from "@/components/semantic-model-prewarm";
 import { DesktopUpdatePrompt } from "@/components/desktop-update-notice";
+import { cloudSyncSidebarPresentation, type CloudSyncSidebarConfig, type CloudSyncSidebarStatus } from "@/lib/cloud-sync-status";
 import { version as appVersion } from "../../package.json";
 
 const nav = [
@@ -26,6 +27,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const isWindowsDesktop = typeof window !== "undefined" && window.mockInterviewDesktop?.platform === "win32";
   const [maximized, setMaximized] = useState(false);
   const [serverError, setServerError] = useState("");
+  const [isDesktop, setIsDesktop] = useState(false);
+  const [cloudSync, setCloudSync] = useState<{ config: CloudSyncSidebarConfig; status: CloudSyncSidebarStatus } | null>(null);
 
   useEffect(() => {
     if (!isWindowsDesktop) return;
@@ -35,6 +38,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => window.mockInterviewDesktop?.server.onStatus((status) => {
     setServerError(status.state === "error" ? status.message : "");
   }), []);
+  useEffect(() => {
+    setIsDesktop(Boolean(window.mockInterviewDesktop) || window.navigator.userAgent.includes("Electron"));
+  }, []);
+  useEffect(() => {
+    if (!isDesktop) return;
+    let active = true;
+    const read = async () => {
+      try {
+        const response = await fetch("/api/cloud-sync", { cache: "no-store" });
+        if (!response.ok) throw new Error("无法读取同步状态。");
+        const data = await response.json() as { config: CloudSyncSidebarConfig; status: CloudSyncSidebarStatus };
+        if (active) setCloudSync(data);
+      } catch {
+        if (active) setCloudSync({ config: { enabled: true, url: "configured" }, status: { passwordConfigured: true, lastSyncedAt: null, pausedReason: null, lastError: "无法读取同步状态。" } });
+      }
+    };
+    void read();
+    const timer = window.setInterval(() => void read(), 60_000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [isDesktop]);
+
+  const syncPresentation = cloudSync ? cloudSyncSidebarPresentation(cloudSync.config, cloudSync.status) : { tone: "muted" as const, label: "正在读取同步状态", title: "正在读取云同步状态。" };
+  const SyncIcon = syncPresentation.tone === "error" ? CloudAlert : syncPresentation.tone === "muted" ? CloudOff : Cloud;
 
   return <div className={isWindowsDesktop ? "app-frame desktop-windows" : "app-frame"}>
     <SemanticModelPrewarm />
@@ -49,7 +75,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <aside className="side-nav" aria-label="主导航">
       <Link href="/" className="brand"><span>S</span><div><b>Study Desk</b><small>v{appVersion}</small></div></Link>
       <nav>{nav.map(([href, label, Icon]) => <Link key={href} href={href} data-tour={tourTargetForNav(href)} className={pathname === href ? "nav-item active" : "nav-item"}><Icon size={20} /><span>{label}</span></Link>)}</nav>
-      <p className="nav-note">每天把一个知识点，练成一句能说清的话。</p>
+      <div className="nav-footer"><p className="nav-note">每天把一个知识点，练成一句能说清的话。</p>{isDesktop && <Link href="/settings?section=backup-sync" className={`cloud-sync-nav ${syncPresentation.tone}`} title={syncPresentation.title} aria-label={syncPresentation.title}><SyncIcon size={17}/><span>{syncPresentation.label}</span></Link>}</div>
     </aside>
     <main className="page-main" data-tour="page-main">{children}</main>
     <DesktopUpdatePrompt />

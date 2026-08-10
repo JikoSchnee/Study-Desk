@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { BookOpenText, Bot, CircleCheck, CircleX, Cloud, Download, ExternalLink, FlaskConical, KeyRound, LoaderCircle, Mic2, RefreshCw, RotateCcw, Save, ShieldCheck, SlidersHorizontal, Sparkles, Upload, Wifi } from "lucide-react";
 import { Button, Panel } from "@/components/ui";
 import { PageLayout } from "@/components/page-layout";
@@ -12,6 +13,7 @@ import type { AnswerComparisonMode, EmbeddingModelSource, TagDisplayLanguage } f
 import { ReleaseNotes, type UpdateCheckResult, useDesktopUpdate } from "@/components/desktop-update-notice";
 import { ReadmeDialog } from "@/components/readme-dialog";
 import { SettingHelp } from "@/components/setting-help";
+import { resolveSettingsSection, settingsSections } from "@/lib/settings-sections";
 
 type EnvironmentSettings = { provider: ModelProviderId; baseUrl: string; model: string; apiKeyConfigured: boolean };
 type LocalEmbeddingModelStatus = { state: "pending" | "downloading" | "verifying" | "retrying" | "importing" | "ready" | "error"; onnxState: "pending" | "parsing" | "ready" | "failed"; downloadedBytes: number; totalBytes: number | null; attempt: number; error?: string };
@@ -28,7 +30,10 @@ const CUSTOM_MODEL_OPTION = "__custom_model__";
 
 function sizeLabel(bytes: number) { return bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`; }
 
-export default function SettingsPage() {
+function SettingsPageContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const activeSection = resolveSettingsSection(searchParams.get("section"));
   const { updateResult, setUpdateResult, lastCheckedAt, setLastCheckedAt } = useDesktopUpdate();
   const [dailyInitialTarget, setDailyInitialTarget] = useState(5);
   const [dailyReviewTarget, setDailyReviewTarget] = useState(10);
@@ -119,7 +124,8 @@ export default function SettingsPage() {
     <header className="page-header"><div><p className="eyebrow"><SlidersHorizontal size={15}/> 设置</p><h1>把节奏调成适合你的样子。</h1><p>本地优先，配置只保存在你的设备上。</p></div></header>
     {readmeOpen && <ReadmeDialog onClose={() => setReadmeOpen(false)} />}
     {agentGuideOpen && <ReadmeDialog onClose={() => setAgentGuideOpen(false)} endpoint="/api/agent-mcp" eyebrow="Agent 使用手册" title="Agent · MCP" description="查看 Agent 可读取的数据、可调用工具与必须遵守的安全边界。" label="Agent · MCP 使用手册" Icon={Bot} tone="agent" />}
-    <div className="settings-layout">
+    <div className="settings-layout" data-section={activeSection}>
+      <div className="settings-content">
       <Panel className="readme-panel"><div className="readme-panel-icon"><BookOpenText size={22}/></div><div><p className="eyebrow">使用说明</p><h2>README</h2><p>查看项目最新的安装、启动与更新说明。</p></div><Button type="button" variant="secondary" onClick={() => setReadmeOpen(true)}><BookOpenText size={17}/> 查看 README</Button></Panel>
       <Panel className="readme-panel agent-mcp-panel"><div className="readme-panel-icon"><Bot size={22}/></div><div><p className="eyebrow">Agent 使用说明</p><h2>Agent · MCP</h2><p>查看 Agent 能读取什么、可以执行哪些操作，以及何时必须向你确认。</p></div><Button type="button" variant="secondary" onClick={() => setAgentGuideOpen(true)}><Bot size={17}/> 查看操作手册</Button></Panel>
       <section className="settings-top-grid">
@@ -132,6 +138,17 @@ export default function SettingsPage() {
         <Panel className="environment-panel"><p className="eyebrow"><KeyRound size={15}/> 本地 .env.local</p><h2>LLM 服务</h2><p className="muted-copy">选择服务商、具体模型并填写 API Key；未列出的模型可直接自定义填写。</p><div className="form-grid"><label className="field">模型服务<select value={provider} onChange={(event) => chooseProvider(event.target.value as ModelProviderId)}>{Object.entries(modelProviders).map(([id, item]) => <option key={id} value={id}>{item.label}</option>)}</select></label>{provider !== "custom" && <><div className="provider-preview"><Sparkles size={17}/><div><strong>{preset.label}</strong><p>{preset.detail}{selectedModel ? ` · ${selectedModel.detail}` : " · 自定义模型"}</p></div></div><label className="field">具体模型<select value={usesCustomModel ? CUSTOM_MODEL_OPTION : model} onChange={(event) => chooseModel(event.target.value)}>{preset.models.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}<option value={CUSTOM_MODEL_OPTION}>自定义模型名称…</option></select></label>{usesCustomModel && <label className="field">自定义模型名称<input value={model} onChange={(event) => setModel(event.target.value)} placeholder="输入模型标识" /></label>}</>}{provider === "custom" && <><label className="field">兼容 API 地址<input type="url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.example.com/v1" /></label><label className="field">模型名称<input value={model} onChange={(event) => setModel(event.target.value)} placeholder="例如 gpt-4.1-mini" /></label></>}<label className="field">API Key<input type="password" autoComplete="new-password" value={apiKey} onChange={(event) => { setApiKey(event.target.value); setClearApiKey(false); }} placeholder={keyConfiguredForSelection ? "已配置；留空则保持不变" : "粘贴 API Key"} /></label>{keyConfiguredForSelection && <label className="environment-check"><input type="checkbox" checked={clearApiKey} onChange={(event) => { setClearApiKey(event.target.checked); if (event.target.checked) setApiKey(""); }} /> 移除已保存的 API Key</label>}<Button type="button" variant="secondary" disabled={savingEnvironment} onClick={saveEnvironment}><Save size={17}/> 保存模型配置</Button></div><p className="environment-security"><ShieldCheck size={16}/> 密钥不会从服务器回传到浏览器；同一服务留空可保留已有密钥。</p>{provider === "claude" && <p className="provider-note">Claude 选项使用 Anthropic API Key；Claude Code 订阅登录不能替代 API Key。</p>}{environmentNotice && <p className="muted-copy" role="status">{environmentNotice}</p>}</Panel>
       </section>
       <section className="settings-auxiliary-grid" aria-label="辅助功能"><Panel className="test-features-panel"><p className="eyebrow"><FlaskConical size={15}/> 测试功能</p><h2>开发中的功能</h2><p className="muted-copy">以下功能仍在开发中，可能会调整或不稳定；使用前建议先下载备份。</p><div className="test-feature-actions"><Link className="button secondary" href="/interview"><Mic2 size={17}/> 进入模拟面试</Link><Link className="button outline" href="/knowledge-base"><Sparkles size={17}/> 进入知识库</Link>{restartPlanConfirming ? <><Button type="button" variant="warning" disabled={restartingPlan} onClick={() => void restartPlan()}><RotateCcw size={16}/>{restartingPlan ? "正在重启计划…" : "确认重启计划"}</Button><Button type="button" variant="ghost" disabled={restartingPlan} onClick={() => setRestartPlanConfirming(false)}>取消</Button></> : <Button type="button" variant="warning" className="restart-plan-button" data-tooltip="跳过之前未完成的每日任务，按当前每日目标从今天重新安排；不会删除卡片、学习记录或复习排程。" disabled={restartingPlan} onClick={() => setRestartPlanConfirming(true)}><RotateCcw size={16}/>重启计划</Button>}</div><div className="network-diagnostics"><div><strong><Wifi size={16}/> 联网诊断</strong><p>分别检测 Electron 系统网络与本地服务；不会发送你的数据或 API Key。</p></div><Button type="button" variant="outline" disabled={testingNetwork} onClick={() => void testNetwork()}>{testingNetwork ? <LoaderCircle className="network-test-spinner" size={16}/> : <Wifi size={16}/>}{testingNetwork ? "正在检测…" : "测试联网"}</Button></div>{networkDiagnosticError && <p className="network-diagnostic-error" role="alert">{networkDiagnosticError}</p>}{networkDiagnostics && <div className="network-diagnostic-results" role="status" aria-live="polite">{networkDiagnostics.layers.map((layer) => <div className="network-diagnostic-layer" key={layer.id}><strong>{layer.label}<span>{layer.transport}</span></strong>{layer.checks.map((item) => <div className={item.ok ? "network-diagnostic-result ok" : "network-diagnostic-result error"} key={item.id}>{item.ok ? <CircleCheck size={18}/> : <CircleX size={18}/>}<div><strong>{item.label}{item.ok ? "可访问" : "无法访问"}</strong><p>{item.detail}</p></div><span>{item.durationMs} ms{item.status ? ` · HTTP ${item.status}` : ""}</span></div>)}</div>)}{networkDiagnostics.guidance && <p className="network-diagnostic-guidance">{networkDiagnostics.guidance}</p>}</div>}{restartPlanNotice && <p className="muted-copy" role="status">{restartPlanNotice}</p>}</Panel></section>
+      </div>
+      <aside className="settings-section-nav" aria-label="设置分类">
+        <p className="eyebrow"><SlidersHorizontal size={15}/> 设置目录</p>
+        <div className="settings-section-nav-list">
+          {settingsSections.map((section) => <button key={section.id} type="button" className={activeSection === section.id ? "active" : ""} aria-current={activeSection === section.id ? "page" : undefined} onClick={() => router.push(section.id === "learning" ? "/settings" : `/settings?section=${section.id}`, { scroll: false })}><strong>{section.label}</strong><span>{section.description}</span></button>)}
+        </div>
+      </aside>
     </div>
   </PageLayout>;
+}
+
+export default function SettingsPage() {
+  return <Suspense fallback={<PageLayout className="settings-page"><p className="loading">正在打开设置…</p></PageLayout>}><SettingsPageContent /></Suspense>;
 }
