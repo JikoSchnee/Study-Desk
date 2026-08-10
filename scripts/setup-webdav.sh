@@ -14,16 +14,21 @@ if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>
   exit 1
 fi
 
-read -r -p "请输入已解析到此服务器的域名（例如 sync.example.com）: " DOMAIN
+if [[ ! -r /dev/tty ]]; then
+  echo "需要可交互终端。请先下载脚本，再用 sudo bash setup-webdav.sh 执行。"
+  exit 1
+fi
+
+read -r -p "请输入已解析到此服务器的域名（例如 sync.example.com）: " DOMAIN < /dev/tty
 if [[ ! "${DOMAIN}" =~ ^[A-Za-z0-9.-]+$ || "${DOMAIN}" != *.* ]]; then
   echo "域名格式无效。请先将域名 A/AAAA 记录指向此服务器，再重新运行。"
   exit 1
 fi
 
-read -r -p "使用默认远端目录 study-desk？[Y/n] " DIRECTORY_ANSWER
+read -r -p "使用默认远端目录 study-desk？[Y/n] " DIRECTORY_ANSWER < /dev/tty
 DIRECTORY="study-desk"
 if [[ "${DIRECTORY_ANSWER,,}" == "n" ]]; then
-  read -r -p "远端目录名称: " DIRECTORY
+  read -r -p "远端目录名称: " DIRECTORY < /dev/tty
   if [[ ! "${DIRECTORY}" =~ ^[A-Za-z0-9._-]+$ ]]; then
     echo "目录只能包含字母、数字、点、下划线和连字符。"
     exit 1

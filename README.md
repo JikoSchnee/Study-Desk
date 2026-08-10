@@ -70,6 +70,13 @@ curl -fsSL https://raw.githubusercontent.com/JikoSchnee/Study-Desk/main/scripts/
 
 脚本只会询问域名和远端目录，随后自动完成以下工作：创建随机同步密码、启动独立 WebDAV 容器、用 Caddy 自动申请 HTTPS 证书，并在终端输出可直接复制到 Study Desk 的地址、目录、用户名和密码。部署脚本可在本项目的 [`scripts/setup-webdav.sh`](scripts/setup-webdav.sh) 审阅。
 
+如果服务器的终端不支持通过管道执行时交互输入，请改用下面两条命令：
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/JikoSchnee/Study-Desk/main/scripts/setup-webdav.sh
+sudo bash setup-webdav.sh
+```
+
 > 如果服务器未安装 Docker，请先按 [Docker 官方安装文档](https://docs.docker.com/engine/install/) 安装 Docker Engine 和 Docker Compose 插件。首次申请证书时，请确认 DNS 已生效且 80/443 没有被其他服务占用。
 
 #### 使用现有 Nextcloud
