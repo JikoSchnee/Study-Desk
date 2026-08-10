@@ -1,5 +1,5 @@
-const { app, BrowserWindow, ipcMain, net: electronNet, powerMonitor, session, utilityProcess } = require("electron");
-const { existsSync } = require("node:fs");
+const { app, BrowserWindow, ipcMain, net: electronNet, powerMonitor, session, utilityProcess, safeStorage } = require("electron");
+const { existsSync, readFileSync, writeFileSync, unlinkSync } = require("node:fs");
 const http = require("node:http");
 const net = require("node:net");
 const path = require("node:path");
@@ -18,6 +18,21 @@ const networkChecks = [
 const networkTimeoutMs = 8_000;
 
 function userHome() { return path.join(app.getPath("userData"), "runtime"); }
+function syncCredentialPath() { return path.join(app.getPath("userData"), "webdav-sync-credential.bin"); }
+function cloudSyncPassword() {
+  try {
+    const file = syncCredentialPath();
+    if (!existsSync(file) || !safeStorage.isEncryptionAvailable()) return "";
+    return safeStorage.decryptString(readFileSync(file));
+  } catch { return ""; }
+}
+function saveCloudSyncPassword(value) {
+  if (!safeStorage.isEncryptionAvailable()) throw new Error("系统安全存储不可用，无法保存 WebDAV 密码。");
+  const file = syncCredentialPath();
+  if (!value) { if (existsSync(file)) unlinkSync(file); return false; }
+  writeFileSync(file, safeStorage.encryptString(value), { mode: 0o600 });
+  return true;
+}
 function sendMaximizeState() { mainWindow?.webContents.send("window:maximize-change", mainWindow?.isMaximized() ?? false); }
 function compareVersions(left, right) {
   const leftParts = String(left).replace(/^v/, "").split(".").map((part) => Number.parseInt(part, 10) || 0);
@@ -125,7 +140,7 @@ async function startServer(port = null) {
   const networkHookPath = path.join(__dirname, "network-fetch.cjs");
   if (!existsSync(networkHookPath)) throw new Error("未找到桌面网络组件。请重新安装或重新打包应用。");
   serverProcess = utilityProcess.fork(serverPath, [], {
-    env: { ...process.env, PORT: String(serverPort), HOSTNAME: "127.0.0.1", MOCK_INTERVIEW_HOME: userHome(), NODE_ENV: "production" },
+    env: { ...process.env, PORT: String(serverPort), HOSTNAME: "127.0.0.1", MOCK_INTERVIEW_HOME: userHome(), MOCK_INTERVIEW_SYNC_PASSWORD: cloudSyncPassword(), NODE_ENV: "production" },
     execArgv: ["--require", networkHookPath],
     session: session.defaultSession,
     stdio: ["ignore", "ignore", "pipe"],
@@ -138,6 +153,12 @@ async function startServer(port = null) {
     void restartServer();
   });
   await waitForServer(serverPort);
+  // Ask the local service to install the user-selected cloud-sync schedule as
+  // soon as the desktop application launches. Failure is non-fatal and will be
+  // surfaced in the Settings page on the next manual check.
+  const syncRequest = http.get(`http://127.0.0.1:${serverPort}/api/cloud-sync`, (response) => response.resume());
+  syncRequest.once("error", () => {});
+  syncRequest.setTimeout(3_000, () => syncRequest.destroy());
 }
 
 async function restartServer() {
@@ -190,6 +211,20 @@ ipcMain.handle("window:toggle-maximize", () => { if (mainWindow?.isMaximized()) 
 ipcMain.handle("window:close", () => mainWindow?.close());
 ipcMain.handle("window:is-maximized", () => mainWindow?.isMaximized() ?? false);
 ipcMain.handle("network:diagnostics", () => desktopNetworkDiagnostics());
+ipcMain.handle("cloud-sync:credential-status", () => ({ configured: Boolean(cloudSyncPassword()), secureStorageAvailable: safeStorage.isEncryptionAvailable() }));
+ipcMain.handle("cloud-sync:save-credential", async (_event, password) => {
+  const configured = saveCloudSyncPassword(typeof password === "string" ? password : "");
+  // The Next service is a separate process. Restarting it is the only point at
+  // which the decrypted password crosses into its private process environment.
+  if (serverProcess) {
+    isRestartingServer = true;
+    await new Promise((resolve) => serverProcess.once("exit", resolve) && serverProcess.kill());
+    isRestartingServer = false;
+    await startServer(serverPort);
+    mainWindow?.webContents.send("desktop:server-recovered");
+  }
+  return { configured, secureStorageAvailable: safeStorage.isEncryptionAvailable() };
+});
 ipcMain.handle("updates:check", async () => {
   const currentVersion = app.getVersion();
   try {

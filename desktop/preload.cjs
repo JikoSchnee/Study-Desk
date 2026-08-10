@@ -19,6 +19,10 @@ contextBridge.exposeInMainWorld("mockInterviewDesktop", {
   network: {
     diagnostics: () => ipcRenderer.invoke("network:diagnostics"),
   },
+  cloudSync: {
+    credentialStatus: () => ipcRenderer.invoke("cloud-sync:credential-status"),
+    saveCredential: (password) => ipcRenderer.invoke("cloud-sync:save-credential", password),
+  },
   server: {
     onStatus: (listener) => {
       const failed = (_event, message) => listener({ state: "error", message });

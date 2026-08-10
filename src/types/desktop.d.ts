@@ -37,6 +37,10 @@ declare global {
       network: {
         diagnostics(): Promise<DesktopNetworkDiagnostics>;
       };
+      cloudSync: {
+        credentialStatus(): Promise<{ configured: boolean; secureStorageAvailable: boolean }>;
+        saveCredential(password: string): Promise<{ configured: boolean; secureStorageAvailable: boolean }>;
+      };
       server: {
         onStatus(listener: (status: { state: "ready" } | { state: "error"; message: string }) => void): () => void;
       };

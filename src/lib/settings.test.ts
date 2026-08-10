@@ -6,12 +6,14 @@ vi.mock("./db", () => ({
   sqlite: {
     prepare: vi.fn(() => ({
       all: () => database.rows,
+      get: () => undefined,
       run: database.run,
     })),
   },
 }));
 
 import { getAppSettings, saveAppSettings, saveEmbeddingModelSource } from "./settings";
+import { getCloudSyncConfig, saveCloudSyncConfig } from "./cloud-sync";
 
 describe("embedding model source setting", () => {
   it("defaults existing installations to automatic downloads", () => {
@@ -44,5 +46,12 @@ describe("embedding model source setting", () => {
     expect(getAppSettings().dailyReportRetentionDays).toBeNull();
     saveAppSettings({ ...getAppSettings(), dailyReportRetentionDays: null });
     expect(database.run).toHaveBeenCalledWith("dailyReportRetentionDays", "permanent");
+  });
+
+  it("keeps WebDAV sync configuration local with safe automatic defaults", () => {
+    expect(getCloudSyncConfig()).toMatchObject({ enabled: true, mode: "automatic", intervalMinutes: 60, directory: "study-desk", maxStorageMb: 100 });
+    saveCloudSyncConfig({ ...getCloudSyncConfig(), url: "https://dav.example.com/", directory: "/study-desk/", username: "learner" });
+    expect(database.run).toHaveBeenCalledWith("cloudSyncUrl", "https://dav.example.com");
+    expect(database.run).toHaveBeenCalledWith("cloudSyncDirectory", "study-desk");
   });
 });

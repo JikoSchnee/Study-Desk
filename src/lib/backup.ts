@@ -1,19 +1,32 @@
 import "server-only";
 import { sqlite } from "@/lib/db";
 
-export const BACKUP_VERSION = 6;
+export const BACKUP_VERSION = 7;
 const tables = ["cards", "card_relations", "review_state", "review_logs", "initial_study_logs", "daily_plans", "daily_tasks", "daily_reports", "daily_report_items", "interview_sessions", "interview_turns", "knowledge_maintenance_proposals", "knowledge_sync_records", "practice_focus", "settings", "tags"] as const;
 type BackupTable = (typeof tables)[number];
 export type AppBackup = { version: number; exportedAt: string; tables: Record<BackupTable, Record<string, unknown>[]> };
 
+const localOnlySettingPrefixes = ["cloudSync", "autoBackupLast", "autoBackupPausedReason"];
+
+function backupRows(table: BackupTable) {
+  const rows = sqlite.prepare(`SELECT * FROM ${table}`).all() as Record<string, unknown>[];
+  // Device-specific destinations, scheduling markers, and failure messages must
+  // never follow a backup to another device.
+  return table === "settings" ? rows.filter((row) => !localOnlySettingPrefixes.some((prefix) => String(row.key).startsWith(prefix))) : rows;
+}
+
+function localOnlySettings() {
+  return (sqlite.prepare("SELECT key, value FROM settings").all() as Record<string, unknown>[]).filter((row) => localOnlySettingPrefixes.some((prefix) => String(row.key).startsWith(prefix)));
+}
+
 export function createBackup(): AppBackup {
-  return { version: BACKUP_VERSION, exportedAt: new Date().toISOString(), tables: Object.fromEntries(tables.map((table) => [table, sqlite.prepare(`SELECT * FROM ${table}`).all() as Record<string, unknown>[]])) as AppBackup["tables"] };
+  return { version: BACKUP_VERSION, exportedAt: new Date().toISOString(), tables: Object.fromEntries(tables.map((table) => [table, backupRows(table)])) as AppBackup["tables"] };
 }
 
 export function parseBackup(value: unknown): AppBackup {
   if (!value || typeof value !== "object") throw new Error("备份文件不是有效 JSON 对象。");
   const backup = value as Partial<AppBackup>;
-  if ((backup.version !== 1 && backup.version !== 2 && backup.version !== 3 && backup.version !== 4 && backup.version !== 5 && backup.version !== BACKUP_VERSION) || !backup.tables || typeof backup.tables !== "object") throw new Error("不支持此备份版本。");
+  if ((backup.version !== 1 && backup.version !== 2 && backup.version !== 3 && backup.version !== 4 && backup.version !== 5 && backup.version !== 6 && backup.version !== BACKUP_VERSION) || !backup.tables || typeof backup.tables !== "object") throw new Error("不支持此备份版本。");
   const legacyTables = tables.filter((table) => table !== "card_relations" && table !== "initial_study_logs" && table !== "daily_reports" && table !== "daily_report_items" && table !== "tags");
   for (const table of legacyTables) if (!Array.isArray(backup.tables[table])) throw new Error(`备份缺少 ${table} 数据。`);
   if (backup.version >= 3 && !Array.isArray(backup.tables.card_relations)) throw new Error("备份缺少 card_relations 数据。");
@@ -40,8 +53,10 @@ export function previewBackup(backup: AppBackup) {
 export function restoreBackup(backup: AppBackup, mode: "merge" | "replace") {
   const transaction = sqlite.transaction(() => {
     if (mode === "replace") {
+      const localSettings = localOnlySettings();
       for (const table of [...tables].reverse()) sqlite.prepare(`DELETE FROM ${table}`).run();
       for (const table of tables) for (const row of backup.tables[table]) insert(table, row);
+      for (const row of localSettings) insert("settings", row);
       return;
     }
     for (const table of tables) {
