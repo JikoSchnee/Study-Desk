@@ -36,3 +36,15 @@
 
 - Windows：运行新版 `Study-Desk-Setup-*.exe`，按安装向导覆盖安装即可；原有训练数据会保留在本机数据目录中。
 - macOS：打开新版 DMG，将 **Study Desk** 拖到“应用程序”并选择替换；若系统再次阻止启动，请重新执行 `xattr -cr "/Applications/Study Desk.app"`。
+
+## MCP（供 Agent 使用）
+
+开发环境可通过以下命令启动本地 MCP Server：
+
+```bash
+npm run mcp:dev
+```
+
+它通过 stdio 提供卡片查询、草稿创建与发布、复习评估和提交、模拟面试等工具。使用任意 MCP Host 时，将命令配置为 `npm run mcp:dev`，工作目录设为本项目根目录。
+
+写入学习状态的操作要求 Agent 带上用户确认；`submit_review` 和面试作答还要求唯一的 `idempotencyKey`，避免重试重复推进排程。详细设计见 [MCP-DESIGN.md](docs/MCP-DESIGN.md)，供接入 Agent 的操作手册见 [AGENT-MCP.md](docs/AGENT-MCP.md)。

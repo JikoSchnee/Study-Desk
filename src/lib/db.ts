@@ -30,6 +30,7 @@ sqlite.exec(`
   CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS tags (id TEXT PRIMARY KEY, tag_key TEXT NOT NULL UNIQUE, chinese TEXT NOT NULL DEFAULT '', english TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS practice_focus (card_id TEXT PRIMARY KEY, is_weak INTEGER NOT NULL DEFAULT 0, is_priority INTEGER NOT NULL DEFAULT 0, reason TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS mcp_idempotency (operation TEXT NOT NULL, idempotency_key TEXT NOT NULL, result TEXT, created_at TEXT NOT NULL, PRIMARY KEY (operation, idempotency_key));
 `);
 
 function ensureColumn(table: string, column: string, definition: string) {
