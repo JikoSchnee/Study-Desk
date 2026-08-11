@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 const README_URL = "https://raw.githubusercontent.com/JikoSchnee/Study-Desk/main/README.md";
 const README_TIMEOUT_MS = 10_000;
@@ -8,6 +10,14 @@ function unavailable(message: string) {
 }
 
 export async function GET() {
+  if (process.env.NODE_ENV === "development") {
+    try {
+      const content = readFileSync(join(process.cwd(), "README.md"), "utf8");
+      if (content.trim()) return NextResponse.json({ content, source: "local" }, { headers: { "Cache-Control": "no-store" } });
+    } catch {
+      // Development falls through to the online README when the local file is unavailable.
+    }
+  }
   const controller = new AbortController();
   let timedOut = false;
   const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, README_TIMEOUT_MS);

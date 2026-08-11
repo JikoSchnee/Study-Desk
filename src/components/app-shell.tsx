@@ -27,7 +27,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [maximized, setMaximized] = useState(false);
   const [serverError, setServerError] = useState("");
   const [isDesktop, setIsDesktop] = useState(false);
-  const [cloudSync, setCloudSync] = useState<{ provider: "webdav" | "supabase"; enabled: boolean; configured: boolean; signedIn: boolean; lastSyncedAt: string | null; lastError: string | null; pausedReason?: string | null } | null>(null);
+  const [cloudSync, setCloudSync] = useState<{ provider: "webdav" | "supabase"; enabled: boolean; configured: boolean; signedIn: boolean; lastSyncedAt: string | null; nextSyncAt?: string | null; lastError: string | null; pausedReason?: string | null } | null>(null);
 
   useEffect(() => {
     if (!isWindowsDesktop) return;
@@ -48,17 +48,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         const response = await fetch("/api/cloud-sync", { cache: "no-store" });
         if (!response.ok) throw new Error("无法读取同步状态。");
         const data = await response.json() as { sidebar: NonNullable<typeof cloudSync> };
-        if (active) setCloudSync(data.sidebar);
+        const desktopSession = await window.mockInterviewDesktop?.supabaseSync.sessionStatus();
+        const sidebar = data.sidebar.provider === "supabase" && desktopSession
+          ? { ...data.sidebar, signedIn: desktopSession.signedIn }
+          : data.sidebar;
+        if (active) setCloudSync(sidebar);
       } catch {
         if (active) setCloudSync({ provider: "webdav", enabled: true, configured: true, signedIn: true, lastSyncedAt: null, lastError: "无法读取同步状态。" });
       }
     };
+    const unsubscribeMagicLink = window.mockInterviewDesktop?.supabaseSync.onMagicLink(() => { void read(); });
+    const unsubscribeSessionChange = window.mockInterviewDesktop?.supabaseSync.onSessionChange(() => { void read(); });
     void read();
     const timer = window.setInterval(() => void read(), 60_000);
-    return () => { active = false; window.clearInterval(timer); };
+    return () => { active = false; window.clearInterval(timer); unsubscribeMagicLink?.(); unsubscribeSessionChange?.(); };
   }, [isDesktop]);
 
-  const syncPresentation = !cloudSync ? { tone: "muted" as const, label: "正在读取同步状态", title: "正在读取云同步状态。" } : !cloudSync.enabled ? { tone: "muted" as const, label: "云同步已关闭", title: "云同步已关闭；点击前往设置。" } : !cloudSync.configured ? { tone: "muted" as const, label: "未配置云同步", title: `尚未配置 ${cloudSync.provider === "supabase" ? "Supabase" : "WebDAV"}；点击前往设置。` } : !cloudSync.signedIn ? { tone: "warning" as const, label: "等待登录", title: "请完成云同步认证。" } : cloudSync.pausedReason ? { tone: "warning" as const, label: "同步已暂停", title: cloudSync.pausedReason } : cloudSync.lastError ? { tone: "error" as const, label: "同步异常", title: cloudSync.lastError } : cloudSync.lastSyncedAt ? { tone: "healthy" as const, label: `已同步 · ${new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(cloudSync.lastSyncedAt))}`, title: `最近同步：${new Date(cloudSync.lastSyncedAt).toLocaleString("zh-CN")}` } : { tone: "warning" as const, label: "等待首次同步", title: "同步器已配置，尚未完成首次同步。" };
+  const nextSyncTitle = cloudSync?.nextSyncAt ? `下次自动同步：${new Date(cloudSync.nextSyncAt).toLocaleString("zh-CN")}` : "未安排下次自动同步。";
+  const syncPresentation = !cloudSync ? { tone: "muted" as const, label: "正在读取同步状态", title: "正在读取云同步状态。" } : !cloudSync.enabled ? { tone: "muted" as const, label: "云同步已关闭", title: "云同步已关闭；点击前往设置。" } : !cloudSync.configured ? { tone: "muted" as const, label: "未配置云同步", title: `尚未配置 ${cloudSync.provider === "supabase" ? "Supabase" : "WebDAV"}；点击前往设置。` } : !cloudSync.signedIn ? { tone: "warning" as const, label: "等待登录", title: "请完成云同步认证。" } : cloudSync.pausedReason ? { tone: "warning" as const, label: "同步已暂停", title: cloudSync.pausedReason } : cloudSync.lastError ? { tone: "error" as const, label: "同步异常", title: cloudSync.lastError } : cloudSync.lastSyncedAt ? { tone: "healthy" as const, label: `已同步 · ${new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(cloudSync.lastSyncedAt))}`, title: `最近同步：${new Date(cloudSync.lastSyncedAt).toLocaleString("zh-CN")}\n${nextSyncTitle}` } : { tone: "warning" as const, label: "等待首次同步", title: `同步器已配置，尚未完成首次同步。${nextSyncTitle}` };
   const SyncIcon = syncPresentation.tone === "error" ? CloudAlert : syncPresentation.tone === "muted" ? CloudOff : Cloud;
 
   return <div className={isWindowsDesktop ? "app-frame desktop-windows" : "app-frame"}>
