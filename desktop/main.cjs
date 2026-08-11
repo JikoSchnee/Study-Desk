@@ -19,6 +19,15 @@ const networkTimeoutMs = 8_000;
 
 function userHome() { return path.join(app.getPath("userData"), "runtime"); }
 function syncCredentialPath() { return path.join(app.getPath("userData"), "webdav-sync-credential.bin"); }
+function supabaseSessionPath() { return path.join(app.getPath("userData"), "supabase-sync-session.bin"); }
+function secureValue(file) {
+  try { return existsSync(file) && safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(readFileSync(file)) : ""; } catch { return ""; }
+}
+function saveSecureValue(file, value, label) {
+  if (!safeStorage.isEncryptionAvailable()) throw new Error(`系统安全存储不可用，无法保存${label}。`);
+  if (!value) { if (existsSync(file)) unlinkSync(file); return false; }
+  writeFileSync(file, safeStorage.encryptString(value), { mode: 0o600 }); return true;
+}
 function cloudSyncPassword() {
   try {
     const file = syncCredentialPath();
@@ -27,12 +36,9 @@ function cloudSyncPassword() {
   } catch { return ""; }
 }
 function saveCloudSyncPassword(value) {
-  if (!safeStorage.isEncryptionAvailable()) throw new Error("系统安全存储不可用，无法保存 WebDAV 密码。");
-  const file = syncCredentialPath();
-  if (!value) { if (existsSync(file)) unlinkSync(file); return false; }
-  writeFileSync(file, safeStorage.encryptString(value), { mode: 0o600 });
-  return true;
+  return saveSecureValue(syncCredentialPath(), value, " WebDAV 密码");
 }
+function supabaseSession() { return secureValue(supabaseSessionPath()); }
 function sendMaximizeState() { mainWindow?.webContents.send("window:maximize-change", mainWindow?.isMaximized() ?? false); }
 function compareVersions(left, right) {
   const leftParts = String(left).replace(/^v/, "").split(".").map((part) => Number.parseInt(part, 10) || 0);
@@ -132,15 +138,19 @@ function isServerAvailable(port) {
 }
 
 async function startServer(port = null) {
-  serverPort = port ?? await findPort();
+  serverPort = port ?? (process.env.STUDY_DESK_DEV_SERVER === "1" ? Number(process.env.STUDY_DESK_DEV_PORT ?? 3010) : await findPort());
+  if (process.env.STUDY_DESK_DEV_SERVER === "1") {
+    await waitForServer(serverPort);
+    return;
+  }
   const serverPath = app.isPackaged
     ? path.join(process.resourcesPath, "next", "server.js")
     : path.join(app.getAppPath(), ".next", "standalone", "server.js");
-  if (!existsSync(serverPath)) throw new Error("未找到应用服务。请先执行 npm run desktop:build。");
+  if (!existsSync(serverPath)) throw new Error("未找到应用服务。请先执行 npm run desktop:build，或使用 npm run desktop:dev:fast。");
   const networkHookPath = path.join(__dirname, "network-fetch.cjs");
   if (!existsSync(networkHookPath)) throw new Error("未找到桌面网络组件。请重新安装或重新打包应用。");
   serverProcess = utilityProcess.fork(serverPath, [], {
-    env: { ...process.env, PORT: String(serverPort), HOSTNAME: "127.0.0.1", MOCK_INTERVIEW_HOME: userHome(), MOCK_INTERVIEW_SYNC_PASSWORD: cloudSyncPassword(), NODE_ENV: "production" },
+    env: { ...process.env, PORT: String(serverPort), HOSTNAME: "127.0.0.1", MOCK_INTERVIEW_HOME: userHome(), MOCK_INTERVIEW_SYNC_PASSWORD: cloudSyncPassword(), MOCK_INTERVIEW_SUPABASE_SESSION: supabaseSession(), NODE_ENV: "production" },
     execArgv: ["--require", networkHookPath],
     session: session.defaultSession,
     stdio: ["ignore", "ignore", "pipe"],
@@ -216,6 +226,18 @@ ipcMain.handle("cloud-sync:save-credential", async (_event, password) => {
   const configured = saveCloudSyncPassword(typeof password === "string" ? password : "");
   // The Next service is a separate process. Restarting it is the only point at
   // which the decrypted password crosses into its private process environment.
+  if (serverProcess) {
+    isRestartingServer = true;
+    await new Promise((resolve) => serverProcess.once("exit", resolve) && serverProcess.kill());
+    isRestartingServer = false;
+    await startServer(serverPort);
+    mainWindow?.webContents.send("desktop:server-recovered");
+  }
+  return { configured, secureStorageAvailable: safeStorage.isEncryptionAvailable() };
+});
+ipcMain.handle("supabase-sync:session-status", () => ({ configured: Boolean(supabaseSession()), secureStorageAvailable: safeStorage.isEncryptionAvailable() }));
+ipcMain.handle("supabase-sync:save-session", async (_event, value) => {
+  const configured = saveSecureValue(supabaseSessionPath(), typeof value === "string" ? value : "", " Supabase 会话");
   if (serverProcess) {
     isRestartingServer = true;
     await new Promise((resolve) => serverProcess.once("exit", resolve) && serverProcess.kill());

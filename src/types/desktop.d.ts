@@ -41,6 +41,10 @@ declare global {
         credentialStatus(): Promise<{ configured: boolean; secureStorageAvailable: boolean }>;
         saveCredential(password: string): Promise<{ configured: boolean; secureStorageAvailable: boolean }>;
       };
+      supabaseSync: {
+        sessionStatus(): Promise<{ configured: boolean; secureStorageAvailable: boolean }>;
+        saveSession(value: string): Promise<{ configured: boolean; secureStorageAvailable: boolean }>;
+      };
       server: {
         onStatus(listener: (status: { state: "ready" } | { state: "error"; message: string }) => void): () => void;
       };

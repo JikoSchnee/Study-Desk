@@ -23,6 +23,10 @@ contextBridge.exposeInMainWorld("mockInterviewDesktop", {
     credentialStatus: () => ipcRenderer.invoke("cloud-sync:credential-status"),
     saveCredential: (password) => ipcRenderer.invoke("cloud-sync:save-credential", password),
   },
+  supabaseSync: {
+    sessionStatus: () => ipcRenderer.invoke("supabase-sync:session-status"),
+    saveSession: (value) => ipcRenderer.invoke("supabase-sync:save-session", value),
+  },
   server: {
     onStatus: (listener) => {
       const failed = (_event, message) => listener({ state: "error", message });
