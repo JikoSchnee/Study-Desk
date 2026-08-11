@@ -2,6 +2,8 @@
 
 像背单词一样整理自己的知识藏品。
 
+> 本文中的云同步教程会直接显示在应用“设置 → 备份与云同步”的问号帮助窗口中。
+
 ## 下载
 
 请只从 [GitHub Releases](https://github.com/JikoSchnee/Study-Desk/releases) 下载正式安装包。当前桌面版**未进行代码签名**，macOS 版本也**未经过 Apple 公证**；首次运行时出现系统安全提示属于预期行为。
@@ -37,11 +39,31 @@
 - Windows：运行新版 `Study-Desk-Setup-*.exe`，按安装向导覆盖安装即可；原有训练数据会保留在本机数据目录中。
 - macOS：打开新版 DMG，将 **Study Desk** 拖到“应用程序”并选择替换；若系统再次阻止启动，请重新执行 `xattr -cr "/Applications/Study Desk.app"`。
 
-## WebDAV 自建云同步
+## 云同步
+
+### WebDAV 同步
 
 桌面版可将完整训练数据同步到你自己的 WebDAV 服务器（例如 Nextcloud、NAS 或其他兼容服务）。同步使用版本化 JSON 快照；卡片内容冲突时会按更新时间合并，不需要 Study Desk 账号或第三方云服务。
 
-### 配置步骤
+### Supabase 同步
+
+Supabase 适合没有已备案服务器、又希望在多台电脑用同一个邮箱同步完整学习数据的用户。它同步卡片、标签、复习状态、日志、计划和可同步设置；本机自动备份仍会独立保留。
+
+#### 管理员配置
+
+1. 在 Supabase 创建项目，在 **SQL Editor** 执行仓库中的 [`supabase/migrations/20260811_study_desk_sync.sql`](supabase/migrations/20260811_study_desk_sync.sql)。
+2. 在 **Authentication → Providers → Email** 启用 Email 登录，并确认允许用户注册。在 Email 模板中使用 `{{ .Token }}`（不要只使用 `{{ .ConfirmationURL }}`），这样应用才能让用户输入邮件中的一次性验证码。
+3. 可直接在应用的 Supabase 面板填写项目 URL 和公开 anon key；也可为开发/部署环境配置 `SUPABASE_URL` 与 `SUPABASE_ANON_KEY`。绝不要填入或发布 `service_role` key。
+4. 发布前用两个测试邮箱验证 RLS：任一账号只能看到自己的 `study_desk_sync_documents` 行。
+
+#### 用户使用方法
+
+1. 打开 **设置 → 备份与云同步 → Supabase 云同步**，启用同步。若 WebDAV 已启用，应用会要求确认后自动关闭它，两个同步器不能同时运行。
+2. 输入邮箱，点击“发送验证码”，再输入邮件中的验证码完成登录。会话只加密保存在当前设备的系统安全存储中。
+3. 第一次同步时按需要选择“合并并同步”“采用云端数据”或“上传本机数据”。建议两端都有内容时先下载本地备份，再选择合并。
+4. 两台设备离线修改后，请先执行一次合并同步。若云端版本已在同步期间变化，应用会要求重新预览并确认数据方向，不会静默覆盖本机数据。
+
+#### 配置步骤
 
 1. 在 WebDAV 服务中创建专用目录或准备一个可写入的位置；建议为 Study Desk 单独创建应用密码，而不是填写主账号密码。
 2. 打开 **设置 → 服务器云同步**，开启“启用 WebDAV 同步”。
@@ -68,7 +90,7 @@ Study Desk 需要一个支持 HTTPS 与 Basic Auth（或等效 WebDAV 认证）�
 curl -fsSL https://raw.githubusercontent.com/JikoSchnee/Study-Desk/main/scripts/setup-webdav.sh | sudo bash
 ```
 
-脚本只会询问域名和远端目录，随后自动完成以下工作：创建随机同步密码、启动独立 WebDAV 容器、用 Caddy 自动申请 HTTPS 证书，并在终端输出可直接复制到 Study Desk 的地址、目录、用户名和密码。部署脚本可在本项目的 [`scripts/setup-webdav.sh`](scripts/setup-webdav.sh) 审阅。
+脚本会询问域名、首个用户名和密码（可自动生成，也可手动设置），随后启动独立 WebDAV 容器、用 Caddy 自动申请 HTTPS 证书，并输出可直接复制到 Study Desk 的连接信息。部署脚本可在本项目的 [`scripts/setup-webdav.sh`](scripts/setup-webdav.sh) 审阅。
 
 如果服务器的终端不支持通过管道执行时交互输入，请改用下面两条命令：
 
@@ -78,6 +100,20 @@ sudo bash setup-webdav.sh
 ```
 
 > 如果服务器未安装 Docker，请先按 [Docker 官方安装文档](https://docs.docker.com/engine/install/) 安装 Docker Engine 和 Docker Compose 插件。首次申请证书时，请确认 DNS 已生效且 80/443 没有被其他服务占用。
+
+#### 管理多个同步账号
+
+部署完成后，在服务器执行下面这一条命令即可进入交互式管理菜单：
+
+```bash
+sudo study-desk-webdav
+```
+
+菜单可创建账号、查看账号与空间占用、重置密码、禁用/重新启用账号，并在二次确认后永久删除某个已禁用账号的数据。创建账号时可选择自动生成随机密码或自己输入密码；密码只在创建或重置时显示一次。
+
+每个账号都有独立且不可互相访问的 WebDAV 根目录。创建完成后，将终端显示的 **WebDAV 地址**、默认远端目录 `study-desk`、用户名和密码填入 Study Desk 即可。若某人要在另一台设备接入自己的云端，两台设备填写同一组四项信息即可；不同用户则应创建不同账号。
+
+旧版单账号 Docker 部署首次运行新版管理命令时，会自动将原有同步数据迁入该账号的独立空间，不需要修改客户端里的用户名、密码或远端目录。
 
 #### 使用现有 Nextcloud
 
@@ -132,9 +168,9 @@ sudo nginx -t && sudo systemctl reload nginx
 
 ### 使用说明与排错
 
-- **同一服务器上的独立云端**：使用同一个 WebDAV 地址、不同的“远端目录”即可隔离数据。例如个人数据使用 `study-desk`，另一位用户使用 `study-desk-alice`，测试数据使用 `study-desk-test`。这些目录的快照不会混合。
+- **同一服务器上的独立云端**：使用 `sudo study-desk-webdav` 为不同用户创建不同账号。账号根目录由服务器隔离，用户无法访问其他账号的数据；各自仍可在客户端保留默认远端目录 `study-desk`。
 - **另一台设备接入同一云端**：在新设备的“服务器云同步”中填写与原设备完全相同的 WebDAV 地址、远端目录、用户名和密码，然后依次点击“保存同步器 → 测试连接 → 立即同步”。新设备会拉取云端数据；两端都有新数据时会自动合并。
-- **账号隔离边界**：一键 Docker 部署默认只创建一个 WebDAV 账号。不同远端目录能隔离同步数据，但持有该账号的人理论上仍可访问其他目录；不同用户需要严格隐私隔离时，应为其配置独立 WebDAV 账号和目录权限。
+- **禁用与清理**：菜单中的“禁用账号”只撤销登录权限，会保留云端快照。永久删除数据只能针对已禁用账号，并要求再次输入用户名确认。
 - 同步器一次只支持一个 WebDAV 目标。两台设备必须填写同一个远端目录，才能共享数据。
 - 自动同步遇到两端都有新数据时会先合并，再写入新的快照；网络、认证或空间错误不会覆盖本机数据，错误会显示在设置页。
 - 云端目录包含 `manifest.json` 与多个快照文件，请不要在同步进行时手动编辑或删除它们；如需停止使用，先关闭同步器再处理目录。
