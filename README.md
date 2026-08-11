@@ -45,24 +45,6 @@
 
 桌面版可将完整训练数据同步到你自己的 WebDAV 服务器（例如 Nextcloud、NAS 或其他兼容服务）。同步使用版本化 JSON 快照；卡片内容冲突时会按更新时间合并，不需要 Study Desk 账号或第三方云服务。
 
-### Supabase 同步
-
-Supabase 适合没有已备案服务器、又希望在多台电脑用同一个邮箱同步完整学习数据的用户。它同步卡片、标签、复习状态、日志、计划和可同步设置；本机自动备份仍会独立保留。
-
-#### 管理员配置
-
-1. 在 Supabase 创建项目，在 **SQL Editor** 执行仓库中的 [`supabase/migrations/20260811_study_desk_sync.sql`](supabase/migrations/20260811_study_desk_sync.sql)。
-2. 在 **Authentication → Providers → Email** 启用 Email 登录，并确认允许用户注册。在 Email 模板中使用 `{{ .Token }}`（不要只使用 `{{ .ConfirmationURL }}`），这样应用才能让用户输入邮件中的一次性验证码。
-3. 可直接在应用的 Supabase 面板填写项目 URL 和公开 anon key；也可为开发/部署环境配置 `SUPABASE_URL` 与 `SUPABASE_ANON_KEY`。绝不要填入或发布 `service_role` key。
-4. 发布前用两个测试邮箱验证 RLS：任一账号只能看到自己的 `study_desk_sync_documents` 行。
-
-#### 用户使用方法
-
-1. 打开 **设置 → 备份与云同步 → Supabase 云同步**，启用同步。若 WebDAV 已启用，应用会要求确认后自动关闭它，两个同步器不能同时运行。
-2. 输入邮箱，点击“发送验证码”，再输入邮件中的验证码完成登录。会话只加密保存在当前设备的系统安全存储中。
-3. 第一次同步时按需要选择“合并并同步”“采用云端数据”或“上传本机数据”。建议两端都有内容时先下载本地备份，再选择合并。
-4. 两台设备离线修改后，请先执行一次合并同步。若云端版本已在同步期间变化，应用会要求重新预览并确认数据方向，不会静默覆盖本机数据。
-
 #### 配置步骤
 
 1. 在 WebDAV 服务中创建专用目录或准备一个可写入的位置；建议为 Study Desk 单独创建应用密码，而不是填写主账号密码。
@@ -176,6 +158,106 @@ sudo nginx -t && sudo systemctl reload nginx
 - 云端目录包含 `manifest.json` 与多个快照文件，请不要在同步进行时手动编辑或删除它们；如需停止使用，先关闭同步器再处理目录。
 - 导出的备份不包含 WebDAV 地址、同步状态、账号、密码、API Key 或本地模型配置。恢复“替换备份”也会保留当前设备的同步器配置。
 - 若连接失败，请确认地址是 WebDAV API 地址而非服务网页地址、账号对该目录有创建/读取/删除权限，并优先使用服务提供的应用密码。
+
+### Supabase 同步
+
+Supabase 适合没有已备案服务器、又希望在多台电脑用同一个邮箱同步完整学习数据的用户。它同步卡片、标签、复习状态、日志、计划和可同步设置；本机自动备份仍会独立保留。
+
+#### 从零配置
+
+1. 在 [Supabase](https://supabase.com/) 创建项目，打开 **SQL Editor**。执行仓库中的唯一初始化脚本 [`supabase/migrations/20260811_study_desk_sync.sql`](supabase/migrations/20260811_study_desk_sync.sql)，或者直接复制并执行下方完整 SQL。它会创建最新同步文档、账号私有历史版本、RLS 策略和条件写入 RPC；只需执行这一次。
+
+   ```sql
+   -- 可重复执行：新项目初始化或已有项目升级都执行这一份。
+   create table if not exists public.study_desk_sync_documents (
+     user_id uuid primary key references auth.users(id) on delete cascade,
+     version bigint not null default 1,
+     backup jsonb not null,
+     updated_at timestamptz not null default now()
+   );
+
+   create table if not exists public.study_desk_sync_history (
+     id uuid primary key default gen_random_uuid(),
+     user_id uuid not null references auth.users(id) on delete cascade,
+     version bigint not null,
+     backup jsonb not null,
+     created_at timestamptz not null default now()
+   );
+   create index if not exists study_desk_sync_history_owner_created
+     on public.study_desk_sync_history (user_id, created_at desc);
+
+   alter table public.study_desk_sync_documents enable row level security;
+   alter table public.study_desk_sync_history enable row level security;
+
+   drop policy if exists "Users manage their own Study Desk document"
+     on public.study_desk_sync_documents;
+   create policy "Users manage their own Study Desk document" on public.study_desk_sync_documents
+     for all to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+   drop policy if exists "Users manage their own Study Desk history"
+     on public.study_desk_sync_history;
+   create policy "Users manage their own Study Desk history" on public.study_desk_sync_history
+     for all to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+   create or replace function public.replace_study_desk_sync_document(expected_version bigint, next_backup jsonb)
+   returns bigint language plpgsql security invoker as $$
+   declare
+     next_version bigint;
+     written_rows integer;
+   begin
+     insert into public.study_desk_sync_documents (user_id, version, backup)
+     values (auth.uid(), 1, next_backup)
+     on conflict (user_id) do update set version = study_desk_sync_documents.version + 1, backup = excluded.backup, updated_at = now()
+     where study_desk_sync_documents.version = expected_version;
+     get diagnostics written_rows = row_count;
+     if written_rows <> 1 then
+       raise exception 'SYNC_VERSION_CONFLICT';
+     end if;
+     select version into next_version from public.study_desk_sync_documents where user_id = auth.uid();
+     if next_version is null or next_version <> expected_version + 1 then
+       raise exception 'SYNC_VERSION_CONFLICT';
+     end if;
+     insert into public.study_desk_sync_history (user_id, version, backup)
+     values (auth.uid(), next_version, next_backup);
+     return next_version;
+   end $$;
+   grant execute on function public.replace_study_desk_sync_document(bigint, jsonb) to authenticated;
+   ```
+
+2. 在 **Authentication → SMTP Settings** 配置自定义 SMTP（例如 Resend、Brevo、Postmark 或 SES）。内置 SMTP 仅适合组织成员测试，发送范围和频率受限。
+3. 在 **Authentication → Providers → Email** 启用 Email 登录，并确认允许用户注册。在 **Authentication → URL Configuration** 中，将 **Site URL** 和 **Redirect URLs** 都添加为 `study-desk://auth/callback`。
+4. 打开 [Supabase Email Templates](https://supabase.com/dashboard/project/_/auth/templates)（登录后会进入当前项目）。在 **Confirm signup** 与 **Magic Link** 模板中保留 `{{ .ConfirmationURL }}`，不要改为 `{{ .Token }}`。
+5. 发布前用两个测试邮箱验证 RLS：任一账号只能看到自己的 `study_desk_sync_documents` 和 `study_desk_sync_history` 行。
+
+已执行过旧版主表 SQL 的项目不需要再找第二份 migration：直接重新执行上面的同一份脚本，即可补齐历史表、索引、策略和新版函数。
+
+#### 应用内连接与同步
+
+1. 打开 **设置 → 备份与云同步 → 服务器云同步**。在共享偏好中选择同步方式、检查间隔、云端最大空间、空间满额时的策略，以及 **保留历史版本**（1–10 份，默认 5 份）。
+2. 打开 Supabase 开关，填写项目 **Connect** 页面提供的 URL 与公开 anon key。也可为开发/部署环境配置 `SUPABASE_URL` 与 `SUPABASE_ANON_KEY`；绝不要填入 `service_role` key。
+3. 输入邮箱后点击“发送 Magic Link”，并在同一台装有 Study Desk 的电脑上打开邮件链接完成登录。会话只加密保存在当前设备的系统安全存储中；应用会在 access token 临近到期时，使用同一安全存储中的 refresh token 自动续期。若 refresh token 已被撤销或过期，应用会清除本机登录态并提示重新登录。
+4. 点击“立即同步”上传首份完整学习数据。两台设备都有数据时，先下载本地备份，再按提示选择合并、采用云端或上传本机。
+5. 两台设备离线修改后，先执行一次合并同步。若云端版本已在同步期间变化，应用会要求重新预览并确认数据方向，不会静默覆盖本机数据。
+
+“保留历史版本”同时作用于两种同步器：WebDAV 会清理最旧快照，Supabase 会清理当前账号最旧的历史版本；它不会删除本机自动备份。
+
+自动同步的下次检查时间仅保存在当前设备。关闭应用期间不会在后台同步；重新打开后，若已超过原定时间，应用会立即补做一次同步，否则会等待到原定时间。每次同步完成（包括失败）都会按当前检查间隔安排下一次，避免网络异常时连续重试。
+
+#### 同步记录与恢复历史版本
+
+登录 Supabase 后，点击账号区“退出登录”左侧的“同步记录”，即可查看当前账号保留的 1–10 份历史版本。每条记录可展开 **查看 diff**，对比该快照和当前本机的逐类数据数量。
+
+点击“恢复此版本”后需要再次确认。应用会先将当前本机完整数据写入一个新的云端历史版本，再把所选版本恢复到本机并同步为最新云端状态；这意味着恢复操作通常会占用两个历史版本位置，并按当前保留数量清理最旧记录。版本正在被另一台设备更新时，恢复会停止并提示你刷新记录后重试，不会静默覆盖数据。
+
+#### Magic Link 快捷登录（无需域名）
+
+1. 在 **Authentication → URL Configuration** 中将 **Site URL** 与 **Redirect URLs** 都添加为 `study-desk://auth/callback`。
+2. 在 **Authentication → Email Templates** 的 **Confirm signup** 与 **Magic Link** 模板中保留 `{{ .ConfirmationURL }}`，不要改为 `{{ .Token }}`。
+3. 回到应用输入邮箱，点击“发送 Magic Link”，然后在**同一台装有 Study Desk 的电脑**上打开邮件链接。Supabase 验证后会通过 `study-desk://auth/callback` 拉起应用，应用将会话加密存入系统安全存储并显示登录成功。
+
+这个桌面深链不需要自有网页域名。若浏览器提示选择应用，请选择 Study Desk；开发模式下请先重新启动一次 `npm run desktop:dev`，让 Electron 注册该协议。
+
+未配置自定义 SMTP 时，Supabase 内置邮件服务仅适合测试：通常只允许项目团队成员邮箱，且发送频率很低。个人跨设备同步可先用团队邮箱测试；需要其他用户登录时应配置自定义 SMTP。
 
 ## MCP（供 Agent 使用）
 
