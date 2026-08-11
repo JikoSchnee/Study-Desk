@@ -6,7 +6,7 @@ const tables = ["cards", "card_relations", "review_state", "review_logs", "initi
 type BackupTable = (typeof tables)[number];
 export type AppBackup = { version: number; exportedAt: string; tables: Record<BackupTable, Record<string, unknown>[]> };
 
-const localOnlySettingPrefixes = ["cloudSync", "autoBackupLast", "autoBackupPausedReason"];
+const localOnlySettingPrefixes = ["cloudSync", "supabaseSyncNextSyncAt", "autoBackupLast", "autoBackupPausedReason"];
 
 function backupRows(table: BackupTable) {
   const rows = sqlite.prepare(`SELECT * FROM ${table}`).all() as Record<string, unknown>[];

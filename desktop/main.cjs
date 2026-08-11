@@ -9,6 +9,7 @@ let serverProcess;
 let serverPort;
 let isQuitting = false;
 let isRestartingServer = false;
+let pendingMagicLink = null;
 const releasesUrl = "https://github.com/JikoSchnee/Study-Desk/releases";
 const networkChecks = [
   { id: "network", label: "基础网络", url: "https://www.baidu.com/" },
@@ -39,6 +40,36 @@ function saveCloudSyncPassword(value) {
   return saveSecureValue(syncCredentialPath(), value, " WebDAV 密码");
 }
 function supabaseSession() { return secureValue(supabaseSessionPath()); }
+function emailFromAccessToken(token) { try { return JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString("utf8")).email ?? null; } catch { return null; } }
+function validSupabaseSession(value) { return Boolean(value && typeof value.access_token === "string" && typeof value.refresh_token === "string"); }
+function supabaseSessionStatus() {
+  const value = supabaseSession();
+  try {
+    const session = value ? JSON.parse(value) : null;
+    return { configured: Boolean(value), signedIn: Boolean(session?.access_token), email: session?.user?.email ?? (session?.access_token ? emailFromAccessToken(session.access_token) : null), secureStorageAvailable: safeStorage.isEncryptionAvailable() };
+  } catch { return { configured: false, signedIn: false, email: null, secureStorageAvailable: safeStorage.isEncryptionAvailable() }; }
+}
+async function acceptSupabaseMagicLink(value) {
+  try {
+    const callback = new URL(value);
+    if (callback.protocol !== "study-desk:" || callback.hostname !== "auth" || callback.pathname !== "/callback") return;
+    const params = new URLSearchParams(callback.hash.slice(1));
+    const access_token = params.get("access_token"); const refresh_token = params.get("refresh_token");
+    if (!access_token || !refresh_token) throw new Error(params.get("error_description") ?? "Magic Link 未返回有效登录会话。");
+    saveSecureValue(supabaseSessionPath(), JSON.stringify({ access_token, refresh_token, user: { email: emailFromAccessToken(access_token) } }), " Supabase 会话");
+    if (serverProcess) { isRestartingServer = true; await new Promise((resolve) => serverProcess.once("exit", resolve) && serverProcess.kill()); isRestartingServer = false; await startServer(serverPort); }
+    if (mainWindow && !mainWindow.isDestroyed()) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); mainWindow.webContents.send("supabase-sync:magic-link", { ok: true, message: "Magic Link 登录成功。" }); }
+  } catch (error) { mainWindow?.webContents.send("supabase-sync:magic-link", { ok: false, message: error instanceof Error ? error.message : "Magic Link 登录失败。" }); }
+}
+function registerDeepLinkProtocol() {
+  // In development Electron is launched through its binary plus this script,
+  // so both are required for macOS to route study-desk:// links back here.
+  if (process.defaultApp && process.argv[1]) {
+    app.setAsDefaultProtocolClient("study-desk", process.execPath, [path.resolve(process.argv[1])]);
+    return;
+  }
+  app.setAsDefaultProtocolClient("study-desk");
+}
 function sendMaximizeState() { mainWindow?.webContents.send("window:maximize-change", mainWindow?.isMaximized() ?? false); }
 function compareVersions(left, right) {
   const leftParts = String(left).replace(/^v/, "").split(".").map((part) => Number.parseInt(part, 10) || 0);
@@ -157,6 +188,19 @@ async function startServer(port = null) {
     serviceName: "Study Desk Server",
   });
   serverProcess.stderr?.on("data", (message) => console.error(`[next] ${message}`));
+  serverProcess.on("message", (message) => {
+    if (!message || typeof message !== "object") return;
+    if (message.type === "supabase-sync:session-refreshed" && validSupabaseSession(message.session)) {
+      try {
+        saveSecureValue(supabaseSessionPath(), JSON.stringify(message.session), " Supabase 会话");
+        mainWindow?.webContents.send("supabase-sync:session-change", supabaseSessionStatus());
+      } catch (error) { console.error("[supabase] failed to securely persist refreshed session", error); }
+    }
+    if (message.type === "supabase-sync:session-expired") {
+      try { saveSecureValue(supabaseSessionPath(), "", " Supabase 会话"); } catch (error) { console.error("[supabase] failed to clear expired session", error); }
+      mainWindow?.webContents.send("supabase-sync:session-change", supabaseSessionStatus());
+    }
+  });
   serverProcess.once("exit", (code, signal) => {
     if (isQuitting) return;
     console.error(`[next] local server exited unexpectedly (code: ${code ?? "none"}, signal: ${signal ?? "none"}).`);
@@ -166,7 +210,9 @@ async function startServer(port = null) {
   // Ask the local service to install the user-selected cloud-sync schedule as
   // soon as the desktop application launches. Failure is non-fatal and will be
   // surfaced in the Settings page on the next manual check.
-  const syncRequest = http.get(`http://127.0.0.1:${serverPort}/api/cloud-sync`, (response) => response.resume());
+  const syncRequest = http.request(`http://127.0.0.1:${serverPort}/api/cloud-sync`, { method: "POST", headers: { "Content-Type": "application/json", "Content-Length": 21 } }, (response) => response.resume());
+  syncRequest.write('{"action":"schedule"}');
+  syncRequest.end();
   syncRequest.once("error", () => {});
   syncRequest.setTimeout(3_000, () => syncRequest.destroy());
 }
@@ -235,7 +281,7 @@ ipcMain.handle("cloud-sync:save-credential", async (_event, password) => {
   }
   return { configured, secureStorageAvailable: safeStorage.isEncryptionAvailable() };
 });
-ipcMain.handle("supabase-sync:session-status", () => ({ configured: Boolean(supabaseSession()), secureStorageAvailable: safeStorage.isEncryptionAvailable() }));
+ipcMain.handle("supabase-sync:session-status", () => supabaseSessionStatus());
 ipcMain.handle("supabase-sync:save-session", async (_event, value) => {
   const configured = saveSecureValue(supabaseSessionPath(), typeof value === "string" ? value : "", " Supabase 会话");
   if (serverProcess) {
@@ -245,6 +291,8 @@ ipcMain.handle("supabase-sync:save-session", async (_event, value) => {
     await startServer(serverPort);
     mainWindow?.webContents.send("desktop:server-recovered");
   }
+  const status = supabaseSessionStatus();
+  mainWindow?.webContents.send("supabase-sync:session-change", status);
   return { configured, secureStorageAvailable: safeStorage.isEncryptionAvailable() };
 });
 ipcMain.handle("updates:check", async () => {
@@ -267,7 +315,12 @@ ipcMain.handle("updates:check", async () => {
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) app.quit();
 
-app.on("second-instance", () => {
+// macOS delivers a custom-protocol launch through this event. Register it
+// before Electron becomes ready so links opened during startup are not lost.
+app.on("open-url", (event, url) => { event.preventDefault(); if (app.isReady()) void acceptSupabaseMagicLink(url); else pendingMagicLink = url; });
+
+app.on("second-instance", (_event, commandLine) => {
+  const callback = commandLine.find((item) => item.startsWith("study-desk://")); if (callback) void acceptSupabaseMagicLink(callback);
   if (!mainWindow) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.focus();
@@ -275,7 +328,8 @@ app.on("second-instance", () => {
 
 app.whenReady().then(async () => {
   if (!gotSingleInstanceLock) return;
-  try { await startServer(); createWindow(); }
+  registerDeepLinkProtocol();
+  try { await startServer(); createWindow(); if (pendingMagicLink) { const callback = pendingMagicLink; pendingMagicLink = null; void acceptSupabaseMagicLink(callback); } }
   catch (error) { console.error(error); app.quit(); }
 });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });

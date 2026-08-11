@@ -42,8 +42,10 @@ declare global {
         saveCredential(password: string): Promise<{ configured: boolean; secureStorageAvailable: boolean }>;
       };
       supabaseSync: {
-        sessionStatus(): Promise<{ configured: boolean; secureStorageAvailable: boolean }>;
+        sessionStatus(): Promise<{ configured: boolean; signedIn: boolean; email: string | null; secureStorageAvailable: boolean }>;
         saveSession(value: string): Promise<{ configured: boolean; secureStorageAvailable: boolean }>;
+        onMagicLink(listener: (result: { ok: boolean; message: string }) => void): () => void;
+        onSessionChange(listener: (result: { configured: boolean; signedIn: boolean; email: string | null; secureStorageAvailable: boolean }) => void): () => void;
       };
       server: {
         onStatus(listener: (status: { state: "ready" } | { state: "error"; message: string }) => void): () => void;

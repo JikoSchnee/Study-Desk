@@ -72,6 +72,14 @@
     "appId": "com.jikoschnee.mockinterview",
     "productName": "Study Desk",
     "artifactName": "Study-Desk-${version}-${os}-${arch}.${ext}",
+    "protocols": [
+      {
+        "name": "Study Desk",
+        "schemes": [
+          "study-desk"
+        ]
+      }
+    ],
     "npmRebuild": false,
     "directories": {
       "output": "release"
