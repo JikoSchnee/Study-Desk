@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ArrowDown, ArrowUp, Check, Link2, Plus, Search, Sparkles, Tags, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui";
+import { fetchJson, LocalApiError } from "@/lib/client-api";
 import { rankRelatedCardOptions } from "@/lib/related-card-options";
 import { promoteQuestionVariant } from "@/lib/question-variants";
 import { answerPointLabels } from "@/lib/import";
@@ -96,35 +97,44 @@ export function cardRecommendationExcludedIds(excludeId: string | undefined, rel
 export function useCardRecommendations(draft: CardRecommendationDraft, excludeId: string | undefined, relations: CardRelation[], preloaded?: PreloadedCardRecommendations) {
   const [result, setResult] = useState<CardRecommendationResult>(emptyRecommendations);
   const [state, setState] = useState<"idle" | "loading" | "error">("idle");
+  const [errorMessage, setErrorMessage] = useState("");
   const serializedDraft = cardRecommendationDraftKey(draft);
   const excludedIds = cardRecommendationExcludedIds(excludeId, relations);
   const hasPreloadedResult = preloaded?.draftKey === serializedDraft && preloaded.excludedIds === excludedIds;
 
   useEffect(() => {
-    if (draft.question.trim().length < 3) { setResult(emptyRecommendations); setState("idle"); return; }
-    if (hasPreloadedResult) { setResult(preloaded.result); setState("idle"); return; }
+    if (draft.question.trim().length < 3) { setResult(emptyRecommendations); setState("idle"); setErrorMessage(""); return; }
+    if (hasPreloadedResult) { setResult(preloaded.result); setState("idle"); setErrorMessage(""); return; }
     const controller = new AbortController();
     const currentDraft = JSON.parse(serializedDraft) as CardRecommendationDraft;
     const timer = window.setTimeout(async () => {
       setState("loading");
       try {
-        const response = await fetch("/api/cards/recommendations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ draft: currentDraft, excludeCardIds: JSON.parse(excludedIds) }), signal: controller.signal });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error);
+        const request = () => fetchJson<CardRecommendationResult>("/api/cards/recommendations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ draft: currentDraft, excludeCardIds: JSON.parse(excludedIds) }), signal: controller.signal, timeoutMs: 45_000, label: "生成关联问题推荐" });
+        let data: CardRecommendationResult;
+        try {
+          data = await request();
+        } catch (error) {
+          if (!(error instanceof LocalApiError) || !["network", "timeout"].includes(error.kind) || controller.signal.aborted) throw error;
+          await new Promise((resolve) => window.setTimeout(resolve, 1_000));
+          data = await request();
+        }
         setResult({ relatedCards: data.relatedCards ?? [], tags: data.tags ?? [] });
         setState("idle");
-      } catch {
+        setErrorMessage("");
+      } catch (error) {
         if (controller.signal.aborted) return;
         setResult(emptyRecommendations);
         setState("error");
+        setErrorMessage(error instanceof Error ? error.message : "暂时无法生成关联推荐。");
       }
     }, 700);
     return () => { controller.abort(); window.clearTimeout(timer); };
   }, [draft.question, excludedIds, hasPreloadedResult, preloaded, serializedDraft]);
-  return { ...(hasPreloadedResult ? preloaded.result : result), state: hasPreloadedResult ? "idle" : state };
+  return { ...(hasPreloadedResult ? preloaded.result : result), state: hasPreloadedResult ? "idle" : state, errorMessage: hasPreloadedResult ? "" : errorMessage };
 }
 
-export function RelatedCardsEditor({ cards, value, onChange, excludeId, recommendations = [], recommendationState = "idle" }: { cards: Card[]; value: CardRelation[]; onChange: (relations: CardRelation[]) => void; excludeId?: string; recommendations?: CardRecommendation[]; recommendationState?: "idle" | "loading" | "error" }) {
+export function RelatedCardsEditor({ cards, value, onChange, excludeId, recommendations = [], recommendationState = "idle", recommendationError }: { cards: Card[]; value: CardRelation[]; onChange: (relations: CardRelation[]) => void; excludeId?: string; recommendations?: CardRecommendation[]; recommendationState?: "idle" | "loading" | "error"; recommendationError?: string }) {
   const [query, setQuery] = useState("");
   const choices = cards.filter((card) => card.id !== excludeId);
   const selected = value.flatMap((relation) => {
@@ -140,7 +150,7 @@ export function RelatedCardsEditor({ cards, value, onChange, excludeId, recommen
     {choices.length ? <>
       <label className="related-card-search"><Search size={16}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索已有问题、类型或标签" aria-label="搜索关联问题" /></label>
       {recommendationState === "loading" && <p className="recommendation-status" role="status">正在理解整张卡片内容并排序…</p>}
-      {recommendationState === "error" && <p className="recommendation-status error" role="status">本地语义模型暂不可用；你仍可手动设置关联问题。</p>}
+      {recommendationState === "error" && <p className="recommendation-status error" role="status">{recommendationError || "关联推荐暂不可用；你仍可手动设置关联问题。"}</p>}
       <div className="related-card-options" role="list" aria-label="可关联的问题">{matches.length ? matches.map(({ card, score }) => {
         const active = value.some((relation) => relation.cardId === card.id);
         return <button type="button" className={active ? "selected" : ""} key={card.id} onClick={() => toggle(card.id)} aria-pressed={active}><span>{active ? <Check size={15}/> : <Plus size={15}/>}</span><strong>{card.question}</strong><small>{score === undefined ? card.track : `${score}% · ${card.track}`}</small></button>;

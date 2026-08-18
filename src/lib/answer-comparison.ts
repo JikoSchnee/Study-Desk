@@ -12,6 +12,7 @@ type Segment = { text: string; start: number; end: number };
 type Embedder = (values: string[]) => Promise<number[][]>;
 
 let embedderPromise: Promise<Embedder> | null = null;
+let embeddingInferenceChain: Promise<void> = Promise.resolve();
 const LOCAL_EMBEDDING_MODEL = "Xenova/bge-m3";
 const EMBEDDING_CACHE_DIR = join(process.env.MOCK_INTERVIEW_HOME || process.cwd(), ".cache", "answer-comparison");
 const EMBEDDING_MODEL_DIR = join(EMBEDDING_CACHE_DIR, "Xenova", "bge-m3");
@@ -25,6 +26,7 @@ const MODEL_DOWNLOAD_START_TIMEOUT_MS = 30_000;
 const MODEL_DOWNLOAD_IDLE_TIMEOUT_MS = 30_000;
 const MODEL_DOWNLOAD_START_TIMEOUT_ERROR = "模型下载在 30 秒内未开始。请检查网络连接，或切换为离线导入。";
 const MODEL_DOWNLOAD_IDLE_TIMEOUT_ERROR = "模型下载已超过 30 秒没有新进度。请检查网络后重试，或切换为离线导入。";
+const EMBEDDING_BATCH_SIZE = 8;
 export const LOCAL_EMBEDDING_MODEL_ARCHIVE_MAX_BYTES = 800 * 1024 * 1024;
 // Keep this list aligned with the files Transformers.js loads for bge-m3. The
 // automatic download writes these four files; optional repository artifacts such
@@ -498,8 +500,16 @@ async function getEmbedder(progressId?: string): Promise<Embedder> {
       await markModelReady();
       setComparisonProgress(progressId, { percent: 52, stage: "recognizing", message: "模型已就绪，正在理解答案…" });
       return async (values: string[]) => {
-        const tensor = await extractor(values, { pooling: "cls", normalize: true }) as unknown as { tolist(): number[][] };
-        return tensor.tolist();
+        // The library preloads recommendations while an editor can request its
+        // own suggestions. Serialize ONNX calls to avoid competing for a large
+        // model's working memory.
+        const run = async () => {
+          const tensor = await extractor(values, { pooling: "cls", normalize: true }) as unknown as { tolist(): number[][] };
+          return tensor.tolist();
+        };
+        const queued = embeddingInferenceChain.then(run, run);
+        embeddingInferenceChain = queued.then(() => undefined, () => undefined);
+        return queued;
       };
     })();
     embedderPromise = promise;
@@ -517,7 +527,11 @@ async function getEmbedder(progressId?: string): Promise<Embedder> {
 export async function embedTexts(values: string[], progressId?: string) {
   if (!values.length) return [];
   const embed = await getEmbedder(progressId);
-  return embed(values);
+  const vectors: number[][] = [];
+  for (let offset = 0; offset < values.length; offset += EMBEDDING_BATCH_SIZE) {
+    vectors.push(...await embed(values.slice(offset, offset + EMBEDDING_BATCH_SIZE)));
+  }
+  return vectors;
 }
 
 export async function compareWithEmbeddings(card: Card, answer: string, requestedMode: AnswerComparisonMode = "embedding", progressId?: string): Promise<AnswerComparison> {
