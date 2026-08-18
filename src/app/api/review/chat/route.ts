@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCard } from "@/lib/cards";
 import { generateLearningChatCardDraft, hasRemoteModelConfig, streamLearningChatResponse, type LearningChatMessage } from "@/lib/ai";
+import { activePlanCardIds } from "@/lib/study-plans";
 
 const messageSchema = z.object({
   role: z.enum(["user", "assistant"]),
@@ -20,6 +21,7 @@ export async function POST(request: Request) {
     const input = schema.parse(await request.json());
     const card = getCard(input.cardId);
     if (!card) return NextResponse.json({ error: "找不到当前卡片。" }, { status: 404 });
+    if (!activePlanCardIds().has(input.cardId)) return NextResponse.json({ error: "这张卡片不属于当前计划书。" }, { status: 403 });
     if (!hasRemoteModelConfig()) return NextResponse.json({ error: "请先在设置中配置模型服务，再使用学习助手。", requiresConfiguration: true }, { status: 409 });
     const messages = input.messages as LearningChatMessage[];
     if (input.action === "chat") return new Response(await streamLearningChatResponse(card, messages, input.message), { headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-cache, no-transform" } });

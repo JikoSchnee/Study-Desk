@@ -6,6 +6,7 @@ import { evaluateAnswer } from "@/lib/ai";
 import { allQuestionTexts, pickPresentedQuestion } from "@/lib/question-variants";
 import { getAppSettings } from "@/lib/settings";
 import type { AnswerComparisonMode } from "@/lib/types";
+import { activePlanCardIds } from "@/lib/study-plans";
 
 type SessionConfig = { cardIds: string[]; mode: "real" | "practice"; cursor: number };
 type StoredTurn = { id: string; card_id: string; question: string; answer: string | null; score: number | null; feedback: string | null; comparison_mode: string | null; answer_comparison: string | null; is_extension: number; created_at: string };
@@ -20,7 +21,8 @@ function newTurn(sessionId: string, cardId: string, index: number) {
 }
 
 export function startInterview(input: { cardIds?: string[]; mode?: "real" | "practice" } = {}) {
-  const cards = input.cardIds?.map(getCard).filter(Boolean) ?? listCards().filter((card) => card.status !== "archived");
+  const allowed = activePlanCardIds();
+  const cards = (input.cardIds?.map(getCard).filter(Boolean) ?? listCards().filter((card) => card.status !== "archived")).filter((card) => card && allowed.has(card.id));
   if (!cards.length) throw new Error("请先创建至少一张卡片。");
   const sessionId = randomUUID();
   const config: SessionConfig = { cardIds: cards.map((card) => card!.id), mode: input.mode ?? "real", cursor: 0 };

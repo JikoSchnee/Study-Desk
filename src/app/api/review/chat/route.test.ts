@@ -4,6 +4,7 @@ const cards = vi.hoisted(() => ({ card: { id: "11111111-1111-4111-8111-111111111
 const ai = vi.hoisted(() => ({ configured: true, stream: vi.fn(), draft: vi.fn() }));
 
 vi.mock("@/lib/cards", () => ({ getCard: (id: string) => cards.card?.id === id ? cards.card : null }));
+vi.mock("@/lib/study-plans", () => ({ activePlanCardIds: () => new Set(cards.card ? [cards.card.id] : []) }));
 vi.mock("@/lib/ai", () => ({
   hasRemoteModelConfig: () => ai.configured,
   streamLearningChatResponse: ai.stream,

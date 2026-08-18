@@ -7,7 +7,8 @@ import { isNativeAddonError, localApiErrorResponse } from "@/lib/local-api-error
 const questionVariantSchema = z.object({ id: z.string().min(1), content: z.string(), source: z.enum(["manual", "ai"]) });
 const answerPointSchema = z.object({ id: z.string().min(1), content: z.string(), hint: z.string().optional().default(""), note: z.string().optional().default(""), role: z.enum(["opening", "key", "closing"]).optional().default("key"), parentId: z.string().min(1).optional() });
 const cardRelationSchema = z.object({ cardId: z.string().uuid(), type: z.enum(["related", "parent", "child"]) });
-const cardInputSchema = z.object({ question: z.string().min(3), questionVariants: z.array(questionVariantSchema).default([]), relations: z.array(cardRelationSchema).default([]), answer: z.string().optional(), answerPoints: z.array(answerPointSchema).optional(), note: z.string().optional().default(""), track: z.string().trim().min(1), tags: z.array(z.string()).default([]), difficulty: z.number().int().min(1).max(5).default(3), source: z.string().optional() });
+const cardInputBaseSchema = z.object({ question: z.string().min(3), questionVariants: z.array(questionVariantSchema).default([]), relations: z.array(cardRelationSchema).default([]), answer: z.string().optional(), answerPoints: z.array(answerPointSchema).optional(), note: z.string().optional().default(""), track: z.string().trim().default(""), knowledgeBaseId: z.string().uuid().optional(), tags: z.array(z.string()).default([]), difficulty: z.number().int().min(1).max(5).default(3), source: z.string().optional() });
+const cardInputSchema = cardInputBaseSchema.refine((value) => Boolean(value.knowledgeBaseId || value.track), { message: "请选择知识库。", path: ["knowledgeBaseId"] });
 
 function validateCard(value: z.infer<typeof cardInputSchema>, context: z.RefinementCtx) {
   const answerPoints = value.answerPoints?.length ? value.answerPoints : answerPointsFromText(value.answer ?? "");
@@ -19,7 +20,7 @@ function validateCard(value: z.infer<typeof cardInputSchema>, context: z.Refinem
 }
 
 const cardSchema = cardInputSchema.transform(validateCard);
-const updateCardSchema = cardInputSchema.extend({ id: z.string().uuid(), answerPoints: z.array(answerPointSchema).min(1) }).transform((value, context) => {
+const updateCardSchema = cardInputBaseSchema.extend({ id: z.string().uuid(), answerPoints: z.array(answerPointSchema).min(1) }).refine((value) => Boolean(value.knowledgeBaseId || value.track), { message: "请选择知识库。", path: ["knowledgeBaseId"] }).transform((value, context) => {
   const answer = answerFromPoints(value.answerPoints);
   const hierarchyError = answerPointHierarchyError(value.answerPoints);
   if (hierarchyError) { context.addIssue({ code: z.ZodIssueCode.custom, message: hierarchyError, path: ["answerPoints"] }); return z.NEVER; }

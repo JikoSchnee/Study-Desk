@@ -2,6 +2,7 @@ import "server-only";
 import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 
 // The desktop shell sets MOCK_INTERVIEW_HOME to Electron's user-data directory.
 // Browser development keeps the existing project-local data directory unchanged.
@@ -15,6 +16,9 @@ if (process.env.NODE_ENV !== "production") globalForDb.mockInterviewDb = sqlite;
 sqlite.pragma("busy_timeout = 5000");
 sqlite.exec(`
   CREATE TABLE IF NOT EXISTS cards (id TEXT PRIMARY KEY, question TEXT NOT NULL, question_variants TEXT NOT NULL DEFAULT '[]', answer TEXT NOT NULL, answer_points TEXT NOT NULL DEFAULT '[]', note TEXT NOT NULL DEFAULT '', track TEXT NOT NULL, tags TEXT NOT NULL, difficulty INTEGER NOT NULL, source TEXT, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS knowledge_bases (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, description TEXT NOT NULL DEFAULT '', source_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS study_plans (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', source_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS study_plan_knowledge_bases (plan_id TEXT NOT NULL, knowledge_base_id TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (plan_id, knowledge_base_id));
   CREATE TABLE IF NOT EXISTS card_relations (card_id TEXT NOT NULL, related_card_id TEXT NOT NULL, relation_type TEXT NOT NULL DEFAULT 'related', created_at TEXT NOT NULL, PRIMARY KEY (card_id, related_card_id));
   CREATE TABLE IF NOT EXISTS review_state (card_id TEXT PRIMARY KEY, fsrs_card TEXT NOT NULL, due_at TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS review_logs (id TEXT PRIMARY KEY, card_id TEXT NOT NULL, response TEXT NOT NULL, ai_score INTEGER NOT NULL, suggested_rating TEXT NOT NULL, confirmed_rating TEXT NOT NULL, comparison_mode TEXT, answer_comparison TEXT, presented_question TEXT, feedback TEXT, next_due_at TEXT, is_initial INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
@@ -45,6 +49,8 @@ function ensureColumn(table: string, column: string, definition: string) {
 ensureColumn("cards", "answer_points", "TEXT NOT NULL DEFAULT '[]'");
 ensureColumn("cards", "question_variants", "TEXT NOT NULL DEFAULT '[]'");
 ensureColumn("cards", "note", "TEXT NOT NULL DEFAULT ''");
+ensureColumn("cards", "knowledge_base_id", "TEXT");
+ensureColumn("cards", "share_source_id", "TEXT");
 ensureColumn("card_relations", "relation_type", "TEXT NOT NULL DEFAULT 'related'");
 ensureColumn("review_logs", "comparison_mode", "TEXT");
 ensureColumn("review_logs", "answer_comparison", "TEXT");
@@ -53,6 +59,7 @@ ensureColumn("review_logs", "feedback", "TEXT");
 ensureColumn("review_logs", "next_due_at", "TEXT");
 ensureColumn("review_logs", "is_initial", "INTEGER NOT NULL DEFAULT 0");
 ensureColumn("daily_tasks", "completed_at", "TEXT");
+ensureColumn("daily_tasks", "study_plan_id", "TEXT");
 ensureColumn("interview_turns", "comparison_mode", "TEXT");
 ensureColumn("interview_turns", "answer_comparison", "TEXT");
 ensureColumn("interview_turns", "parent_turn_id", "TEXT");
@@ -62,6 +69,36 @@ ensureColumn("knowledge_maintenance_proposals", "block", "TEXT NOT NULL DEFAULT 
 ensureColumn("knowledge_maintenance_proposals", "updated_at", "TEXT NOT NULL DEFAULT ''");
 ensureColumn("knowledge_maintenance_proposals", "confirmed_at", "TEXT");
 ensureColumn("knowledge_maintenance_proposals", "completed_at", "TEXT");
+
+const knowledgePlanMigration = "knowledge-plan-entities-v1";
+
+function migrateKnowledgePlans() {
+  if (sqlite.prepare("SELECT value FROM settings WHERE key = ?").get(knowledgePlanMigration)) return;
+  sqlite.transaction(() => {
+    const now = new Date().toISOString();
+    const tracks = sqlite.prepare("SELECT DISTINCT TRIM(track) AS name FROM cards WHERE TRIM(track) <> '' ORDER BY name").all() as Array<{ name: string }>;
+    const ensureBase = sqlite.prepare("INSERT OR IGNORE INTO knowledge_bases (id, name, description, created_at, updated_at) VALUES (?, ?, '', ?, ?)");
+    for (const row of tracks) ensureBase.run(randomUUID(), row.name, now, now);
+    let fallback = sqlite.prepare("SELECT id FROM knowledge_bases ORDER BY created_at, id LIMIT 1").get() as { id: string } | undefined;
+    if (!fallback) {
+      const id = randomUUID();
+      ensureBase.run(id, "未分类", now, now);
+      fallback = { id };
+    }
+    sqlite.prepare(`UPDATE cards SET knowledge_base_id = COALESCE((SELECT id FROM knowledge_bases WHERE name = TRIM(cards.track)), ?) WHERE knowledge_base_id IS NULL OR knowledge_base_id = ''`).run(fallback.id);
+    let plan = sqlite.prepare("SELECT id FROM study_plans WHERE name = '全部知识' ORDER BY created_at, id LIMIT 1").get() as { id: string } | undefined;
+    if (!plan) {
+      plan = { id: randomUUID() };
+      sqlite.prepare("INSERT INTO study_plans (id, name, description, created_at, updated_at) VALUES (?, '全部知识', '包含迁移时已有的全部知识库。', ?, ?)").run(plan.id, now, now);
+    }
+    sqlite.prepare("INSERT OR IGNORE INTO study_plan_knowledge_bases (plan_id, knowledge_base_id, created_at) SELECT ?, id, ? FROM knowledge_bases").run(plan.id, now);
+    sqlite.prepare("UPDATE daily_tasks SET study_plan_id = ? WHERE study_plan_id IS NULL OR study_plan_id = ''").run(plan.id);
+    sqlite.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('activeStudyPlanId', ?)").run(plan.id);
+    sqlite.prepare("INSERT INTO settings (key, value) VALUES (?, ?)").run(knowledgePlanMigration, now);
+  })();
+}
+
+migrateKnowledgePlans();
 
 const dailyTaskCompletionMigration = "daily-task-completed-at-v1";
 

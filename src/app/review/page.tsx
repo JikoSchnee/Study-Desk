@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useRef } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowRight, BookOpenCheck, BrainCircuit, CheckCircle2, ChevronLeft, ChevronRight, Dices, Eye, GraduationCap, Lightbulb, MessageSquareText, PencilLine, RefreshCw, Sparkles, Target } from "lucide-react";
@@ -16,6 +16,7 @@ import { answerPointLabels } from "@/lib/import";
 import { usePageState, usePageStateCache } from "@/components/page-state-cache";
 import { ReviewCardEditorDialog } from "@/components/review-card-editor-dialog";
 import { ReviewLearningChat } from "@/components/review-learning-chat";
+import { StudyPlanManager } from "@/components/study-plan-manager";
 import type { AnswerComparisonMode, Card, CardLearningSummary, Evaluation, RatingName } from "@/lib/types";
 
 type QueueKind = "initial" | "review" | "weak";
@@ -40,6 +41,7 @@ function ReviewPageContent() {
   const searchParams = useSearchParams();
   const targetQueue = searchParams.get("queue");
   const targetCardId = searchParams.get("cardId");
+  const [planReady, setPlanReady] = useState(false);
   const [session, setSession] = usePageState<SessionKind | null>("review:session", null);
   const [card, setCard] = usePageState<Card | null | undefined>("review:card", null);
   const [learning, setLearning] = usePageState<CardLearningSummary | null>("review:learning", null);
@@ -302,6 +304,7 @@ function ReviewPageContent() {
   if (!progress && session === null) return <div className="loading">正在准备今天的练习…</div>;
 
   if (session === null && progress) return <PageLayout>
+    <StudyPlanManager onReadyChange={setPlanReady} />
     <PageHeader eyebrow={<><BrainCircuit size={15}/> 主动回忆</>} title="今天想先练哪一类？" description="导入不会算作练习；第一次作答与之后的复习，会分别留下清晰记录。" tour="review" />
     <section className="review-queue-grid" data-tour="review-initial" aria-label="选择练习队列">
       {(["initial", "review", "random", "weak"] as const).map((kind) => {
@@ -313,7 +316,7 @@ function ReviewPageContent() {
           <div className="review-queue-icon"><Icon size={23}/></div>
           <div><p className="eyebrow">{copy.label}</p><h2>{isRandomQueue ? copy.title : kind === "initial" ? "先把新题学明白" : kind === "review" ? "巩固已学内容" : "集中补弱"}</h2><p>{copy.description}</p></div>
           <div className="review-queue-progress">{isRandomQueue ? <><strong>自由</strong><span>练习</span><small>不影响复习排程</small></> : <><strong>{stats.pending}</strong><span>题待完成</span><small>{progressText(stats)}</small></>}</div>
-          <Button disabled={!isRandomQueue && !stats.pending} onClick={() => { if (isRandomQueue) loadRandom(); else startQueue(kind); }}>{isRandomQueue ? <><Dices size={17}/> 随机抽题</> : stats.pending ? <>开始{copy.label}<ArrowRight size={17}/></> : "今日暂无待完成"}</Button>
+          <Button disabled={!planReady || (!isRandomQueue && !stats.pending)} onClick={() => { if (isRandomQueue) loadRandom(); else startQueue(kind); }}>{!planReady ? "请先配置计划书" : isRandomQueue ? <><Dices size={17}/> 随机抽题</> : stats.pending ? <>开始{copy.label}<ArrowRight size={17}/></> : "今日暂无待完成"}</Button>
         </article>;
       })}
     </section>

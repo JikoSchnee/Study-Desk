@@ -64,6 +64,7 @@ vi.mock("@/lib/planner", () => ({
   ensureDailyPlan: () => planner.tasks,
   listActiveDailyTasks: () => planner.tasks,
 }));
+vi.mock("@/lib/study-plans", () => ({ activePlanCardIds: () => new Set(cards.rows.map((card) => card.id)) }));
 
 import { completeInitialStudy, dueCards, initialCards, nextReviewCard, submitReview } from "@/lib/review";
 

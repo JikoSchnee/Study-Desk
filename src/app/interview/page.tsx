@@ -28,6 +28,7 @@ export default function InterviewPage() {
   const [error, setError] = useState("");
   const [comparisonMode, setComparisonMode] = useState<AnswerComparisonMode>("embedding");
   const [llmConfigured, setLlmConfigured] = useState(false);
+  const [planReady, setPlanReady] = useState(false);
   const semanticProgress = useSemanticComparisonProgress();
   const [followUpCandidate, setFollowUpCandidate] = useState<{ turnId: string; question: string } | null>(null);
 
@@ -38,6 +39,7 @@ export default function InterviewPage() {
       setLlmConfigured(configured);
     }).catch(() => undefined);
   }, []);
+  useEffect(() => { fetch("/api/study-plans").then((response) => response.json()).then((data: { plans?: Array<{ id: string; knowledgeBaseIds: string[] }>; activePlanId?: string }) => setPlanReady(Boolean(data.plans?.find((plan) => plan.id === data.activePlanId)?.knowledgeBaseIds.length))).catch(() => setPlanReady(false)); }, []);
   useEffect(() => {
     if (!sessionId || !turn) return;
     const saved = window.localStorage.getItem(`mock-interview:interview-draft:${sessionId}:${turn.id}`);
@@ -102,7 +104,7 @@ export default function InterviewPage() {
     finally { setDraftBusyTurnId(null); }
   };
 
-  if (!sessionId) return <PageLayout><SemanticComparisonProgress open={semanticProgress.open} progress={semanticProgress.progress}/><PageHeader eyebrow={<><Mic2 size={15}/> 模拟面试</>} title="把答案放进真实语境。" description="问题来自你的卡片；邻近追问会清晰标为 AI 拓展。" tour="interview" /><Panel className="interview-intro" data-tour="interview-start"><div className="microphone-orb"><Mic2 size={34}/></div><h2>15 分钟真实模拟</h2><p>系统会逐题提问、记录你的回答，并在结束后给出表达和知识覆盖反馈。</p><Button onClick={start} disabled={busy}><Play size={17}/> {busy ? "准备中…" : "开始模拟"}</Button>{error && <p className="danger">{error} <Link href="/library">去创建卡片</Link></p>}</Panel></PageLayout>;
+  if (!sessionId) return <PageLayout><SemanticComparisonProgress open={semanticProgress.open} progress={semanticProgress.progress}/><PageHeader eyebrow={<><Mic2 size={15}/> 模拟面试</>} title="把答案放进真实语境。" description="问题来自当前计划书的知识库；邻近追问会清晰标为 AI 拓展。" tour="interview" /><Panel className="interview-intro" data-tour="interview-start"><div className="microphone-orb"><Mic2 size={34}/></div><h2>15 分钟真实模拟</h2><p>{planReady ? "系统会逐题提问、记录你的回答，并在结束后给出表达和知识覆盖反馈。" : "当前计划书还没有知识库，请先在学习页配置计划范围。"}</p><Button onClick={start} disabled={busy || !planReady}><Play size={17}/> {busy ? "准备中…" : planReady ? "开始模拟" : "请先配置计划书"}</Button>{error && <p className="danger">{error} <Link href={planReady ? "/library" : "/review"}>{planReady ? "去创建卡片" : "去配置计划书"}</Link></p>}</Panel></PageLayout>;
   if (!turn) {
     const average = scores.length ? Math.round(scores.reduce((sum, item) => sum + item.score, 0) / scores.length) : 0;
     return <PageLayout><SemanticComparisonProgress open={semanticProgress.open} progress={semanticProgress.progress}/><PageHeader eyebrow="面试报告" title="这场练习完成了。" description="把薄弱点带回复习队列，下一次会更稳。" tour="interview" /><Panel className="interview-stage page-focus-content" data-tour="interview-report"><div className="report-score">{average}</div><h2>综合表现</h2><div className="stack interview-results" style={{ marginTop: 20 }}>{scores.map((score, index) => <article className="interview-result" key={score.turnId}><p className="result-question">第 {index + 1} 题 · {score.question}</p><div className="feedback"><strong>{score.score} 分</strong><p>{score.feedback}</p>{score.gaps.length > 0 && <p>建议回流：{score.gaps.join("、")}</p>}</div><AnswerComparisonView comparison={score.comparison} answer={score.answer}/>{score.otherQuestions.length > 0 && <div className="more-questions compact"><p className="eyebrow">这题还可能这样问</p><ul>{score.otherQuestions.map((question) => <li key={question}>{question}</li>)}</ul></div>}{score.isExtension && <div className="follow-up-library-action"><Button variant="secondary" disabled={draftBusyTurnId === score.turnId} onClick={() => void addFollowUpToLibrary(score.turnId)}><BookOpenCheck size={16}/>{draftBusyTurnId === score.turnId ? "正在生成卡片草稿…" : "将这条追问加入藏品"}</Button></div>}</article>)}</div>{error && <p className="danger" role="alert">{error}</p>}<div className="form-actions" style={{ marginTop: 24 }}><Button onClick={() => { setSessionId(null); setScores([]); }}>再来一次</Button></div></Panel></PageLayout>;

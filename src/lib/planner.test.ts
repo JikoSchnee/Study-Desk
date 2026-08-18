@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-type TaskRow = { id: string; plan_date: string; kind: "learn" | "review"; title: string; card_id: string; estimate_minutes: number; status: "todo" | "done"; created_at: string; completed_at?: string | null };
+type TaskRow = { id: string; plan_date: string; kind: "learn" | "review"; title: string; card_id: string; study_plan_id?: string; estimate_minutes: number; status: "todo" | "done"; created_at: string; completed_at?: string | null };
 
 const state = vi.hoisted(() => ({ planExists: false, tasks: [] as TaskRow[], runs: [] as string[] }));
 
@@ -9,15 +9,14 @@ vi.mock("@/lib/db", () => ({
     prepare: (sql: string) => ({
       get: (...args: unknown[]) => {
         if (sql.startsWith("SELECT date FROM daily_plans")) return state.planExists ? { date: "2026-07-31" } : undefined;
-        if (sql.startsWith("SELECT COUNT(*) AS count FROM daily_tasks WHERE kind")) return { count: state.tasks.filter((task) => task.kind === args[0] && task.status === "done").length };
+        if (sql.startsWith("SELECT COUNT(*) AS count FROM daily_tasks WHERE study_plan_id")) return { count: state.tasks.filter((task) => task.kind === args[1] && task.status === "done").length };
         return undefined;
       },
       all: (...args: unknown[]) => {
-        if (sql.startsWith("SELECT id FROM daily_tasks WHERE kind")) return state.tasks.filter((task) => task.kind === args[0] && task.status === "todo").sort((left, right) => right.plan_date.localeCompare(left.plan_date) || right.created_at.localeCompare(left.created_at) || right.id.localeCompare(left.id)).map((task) => ({ id: task.id }));
+        if (sql.startsWith("SELECT id FROM daily_tasks WHERE study_plan_id")) return state.tasks.filter((task) => task.kind === args[1] && task.status === "todo").sort((left, right) => right.plan_date.localeCompare(left.plan_date) || right.created_at.localeCompare(left.created_at) || right.id.localeCompare(left.id)).map((task) => ({ id: task.id }));
         if (sql.startsWith("SELECT * FROM daily_tasks")) return state.tasks;
         if (sql.startsWith("SELECT c.id, c.question FROM cards c JOIN review_state")) {
-          const limit = Number(args[1]);
-          return [{ id: "review-1", question: "到期题" }, { id: "review-2", question: "第二道到期题" }].slice(0, limit);
+          return [{ id: "review-1", question: "到期题" }, { id: "review-2", question: "第二道到期题" }];
         }
         return [];
       },
@@ -25,9 +24,9 @@ vi.mock("@/lib/db", () => ({
         state.runs.push(sql);
         if (sql.startsWith("INSERT INTO daily_plans")) state.planExists = true;
         if (sql.startsWith("INSERT INTO daily_tasks") && sql.includes("'learn'")) {
-          state.tasks.push({ id: String(args[0]), plan_date: String(args[1]), kind: "learn", title: String(args[2]), card_id: String(args[3]), estimate_minutes: 5, status: "todo", created_at: String(args[4]) });
+          state.tasks.push({ id: String(args[0]), plan_date: String(args[1]), kind: "learn", title: String(args[2]), card_id: String(args[3]), study_plan_id: String(args[4]), estimate_minutes: 5, status: "todo", created_at: String(args[5]) });
         } else if (sql.startsWith("INSERT INTO daily_tasks")) {
-          state.tasks.push({ id: String(args[0]), plan_date: String(args[1]), kind: args[2] as "learn" | "review", title: String(args[3]), card_id: String(args[4]), estimate_minutes: Number(args[5]), status: "todo", created_at: String(args[6]) });
+          state.tasks.push({ id: String(args[0]), plan_date: String(args[1]), kind: args[2] as "learn" | "review", title: String(args[3]), card_id: String(args[4]), study_plan_id: String(args[5]), estimate_minutes: Number(args[6]), status: "todo", created_at: String(args[7]) });
         }
         if (sql.startsWith("DELETE FROM daily_tasks WHERE id")) {
           const index = state.tasks.findIndex((task) => task.id === args[0]);
@@ -50,6 +49,7 @@ vi.mock("@/lib/cards", () => ({
 }));
 
 vi.mock("@/lib/settings", () => ({ getAppSettings: () => ({ dailyInitialTarget: 3, dailyReviewTarget: 2, dailyReportRetentionDays: 30 }) }));
+vi.mock("@/lib/study-plans", () => ({ getActiveStudyPlanId: () => "plan-1", activePlanCardIds: () => new Set(["learn-1", "learn-2", "learn-3", "learn-4", "review-1", "review-2", "old-done", "old-todo", "today-1", "today-2", "today-3"]) }));
 
 import { addExtraInitialStudy, ensureDailyPlan, restartDailyPlan } from "@/lib/planner";
 

@@ -61,10 +61,31 @@ export interface Card {
   answerPoints: AnswerPoint[];
   note: string;
   track: string;
+  knowledgeBaseId?: string;
+  knowledgeBase?: Pick<KnowledgeBase, "id" | "name">;
   tags: string[];
   difficulty: number;
   source?: string | null;
   status: CardStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KnowledgeBase {
+  id: string;
+  name: string;
+  description: string;
+  cardCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StudyPlan {
+  id: string;
+  name: string;
+  description: string;
+  knowledgeBaseIds: string[];
+  knowledgeBases: Array<Pick<KnowledgeBase, "id" | "name" | "cardCount">>;
   createdAt: string;
   updatedAt: string;
 }
@@ -98,6 +119,7 @@ export interface DailyTask {
   title: string;
   detail?: string | null;
   cardId?: string | null;
+  studyPlanId?: string | null;
   estimateMinutes: number;
   status: TaskStatus;
   completedAt?: string | null;
@@ -128,7 +150,7 @@ export interface Evaluation {
   score: number;
   suggestedRating: RatingName;
   feedback: string;
-  covered: string[];
+  covered?: string[];
   gaps: string[];
   comparison: AnswerComparison;
 }

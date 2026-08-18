@@ -8,6 +8,8 @@ export const cards = sqliteTable("cards", {
   answerPoints: text("answer_points").notNull().default("[]"),
   note: text("note").notNull().default(""),
   track: text("track").notNull(),
+  knowledgeBaseId: text("knowledge_base_id"),
+  shareSourceId: text("share_source_id"),
   tags: text("tags").notNull(),
   difficulty: integer("difficulty").notNull(),
   source: text("source"),
@@ -15,6 +17,30 @@ export const cards = sqliteTable("cards", {
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
+
+export const knowledgeBases = sqliteTable("knowledge_bases", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  description: text("description").notNull().default(""),
+  sourceId: text("source_id"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const studyPlans = sqliteTable("study_plans", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  sourceId: text("source_id"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const studyPlanKnowledgeBases = sqliteTable("study_plan_knowledge_bases", {
+  planId: text("plan_id").notNull(),
+  knowledgeBaseId: text("knowledge_base_id").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [primaryKey({ columns: [table.planId, table.knowledgeBaseId] })]);
 
 export const cardRelations = sqliteTable("card_relations", {
   cardId: text("card_id").notNull(),
@@ -63,6 +89,7 @@ export const dailyTasks = sqliteTable("daily_tasks", {
   title: text("title").notNull(),
   detail: text("detail"),
   cardId: text("card_id"),
+  studyPlanId: text("study_plan_id"),
   estimateMinutes: integer("estimate_minutes").notNull(),
   status: text("status").notNull(),
   createdAt: text("created_at").notNull(),

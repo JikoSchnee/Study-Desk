@@ -7,13 +7,14 @@ import { allQuestionTexts, findQuestionCollision, normalizeQuestionVariants, que
 import { findSimilarImportQuestions } from "@/lib/import-similarity";
 import { normalizeCardRelations, reciprocalRelationType } from "@/lib/card-relations";
 import { resolveTagKeys } from "@/lib/tags";
+import { findKnowledgeBaseByName, getKnowledgeBase, getOrCreateKnowledgeBase } from "@/lib/knowledge-bases";
 import type { AnswerPoint, Card, CardRelation, CardStatus, QuestionVariant } from "@/lib/types";
 
-type CardRow = Omit<Card, "tags" | "createdAt" | "updatedAt" | "answerPoints" | "questionVariants" | "relations"> & { answer_points?: string; question_variants?: string; note?: string; tags: string; created_at: string; updated_at: string };
+type CardRow = Omit<Card, "tags" | "createdAt" | "updatedAt" | "answerPoints" | "questionVariants" | "relations" | "knowledgeBase" | "knowledgeBaseId"> & { knowledge_base_id?: string; knowledge_base_name?: string; answer_points?: string; question_variants?: string; note?: string; tags: string; created_at: string; updated_at: string };
 
 function mapCard(row: CardRow, relations: CardRelation[] = []): Card {
   return {
-    id: row.id, question: row.question, questionVariants: normalizeQuestionVariants(row.question, questionVariantsFromStored(row.question_variants)), relations, answer: row.answer, answerPoints: answerPointsFromStored(row.answer_points, row.answer), note: row.note ?? "", track: row.track, tags: parseTags(row.tags), difficulty: row.difficulty,
+    id: row.id, question: row.question, questionVariants: normalizeQuestionVariants(row.question, questionVariantsFromStored(row.question_variants)), relations, answer: row.answer, answerPoints: answerPointsFromStored(row.answer_points, row.answer), note: row.note ?? "", track: row.knowledge_base_name ?? row.track, knowledgeBaseId: row.knowledge_base_id ?? "", knowledgeBase: { id: row.knowledge_base_id ?? "", name: row.knowledge_base_name ?? row.track }, tags: parseTags(row.tags), difficulty: row.difficulty,
     source: row.source, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at,
   };
 }
@@ -30,20 +31,29 @@ function relationsByCardId() {
 
 export function listCards(): Card[] {
   const related = relationsByCardId();
-  return (sqlite.prepare("SELECT * FROM cards ORDER BY updated_at DESC").all() as CardRow[]).map((row) => mapCard(row, related.get(row.id)));
+  return (sqlite.prepare("SELECT c.*, kb.name AS knowledge_base_name FROM cards c LEFT JOIN knowledge_bases kb ON kb.id = c.knowledge_base_id ORDER BY c.updated_at DESC").all() as CardRow[]).map((row) => mapCard(row, related.get(row.id)));
 }
 
 export function getCard(id: string): Card | undefined {
-  const row = sqlite.prepare("SELECT * FROM cards WHERE id = ?").get(id) as CardRow | undefined;
+  const row = sqlite.prepare("SELECT c.*, kb.name AS knowledge_base_name FROM cards c LEFT JOIN knowledge_bases kb ON kb.id = c.knowledge_base_id WHERE c.id = ?").get(id) as CardRow | undefined;
   if (!row) return undefined;
   const related = sqlite.prepare("SELECT related_card_id, relation_type FROM card_relations WHERE card_id = ? ORDER BY created_at DESC").all(id) as Array<{ related_card_id: string; relation_type?: string }>;
   return mapCard(row, related.map((item) => ({ cardId: item.related_card_id, type: item.relation_type === "parent" || item.relation_type === "child" ? item.relation_type : "related" })));
 }
 
-type CardInput = Pick<Card, "question" | "answer" | "track" | "tags" | "difficulty"> & { questionVariants?: QuestionVariant[]; relations?: CardRelation[]; answerPoints?: AnswerPoint[]; note?: string; source?: string; status?: CardStatus; allowQuestionCollision?: boolean };
+type CardInput = Pick<Card, "question" | "answer" | "track" | "tags" | "difficulty"> & { knowledgeBaseId?: string; questionVariants?: QuestionVariant[]; relations?: CardRelation[]; answerPoints?: AnswerPoint[]; note?: string; source?: string; status?: CardStatus; allowQuestionCollision?: boolean };
 
-function existingQuestionTexts(excludeCardId?: string) {
-  return listCards().filter((card) => card.id !== excludeCardId).flatMap(allQuestionTexts);
+function existingQuestionTexts(knowledgeBaseId: string, excludeCardId?: string) {
+  return listCards().filter((card) => card.knowledgeBaseId === knowledgeBaseId && card.id !== excludeCardId).flatMap(allQuestionTexts);
+}
+
+function resolveKnowledgeBase(input: { knowledgeBaseId?: string; track: string }) {
+  if (input.knowledgeBaseId) {
+    const knowledgeBase = getKnowledgeBase(input.knowledgeBaseId);
+    if (!knowledgeBase) throw new Error("选择的知识库不存在。");
+    return knowledgeBase;
+  }
+  return getOrCreateKnowledgeBase(input.track.trim() || "未分类");
 }
 
 function assertRelatedCardsExist(relations: CardRelation[]) {
@@ -77,12 +87,13 @@ export function createCard(input: CardInput) {
   if (!hasCoreAnswerPoint(answerPoints)) throw new Error("请至少填写一条核心答案要点。");
   const answer = answerFromPoints(answerPoints);
   const question = input.question.trim().replace(/\s+/g, " ");
-  const track = input.track.trim();
+  const knowledgeBase = resolveKnowledgeBase(input);
+  const track = knowledgeBase.name;
   const questionVariants = normalizeQuestionVariants(question, input.questionVariants ?? []);
-  const collision = findQuestionCollision(question, questionVariants, existingQuestionTexts());
+  const collision = findQuestionCollision(question, questionVariants, existingQuestionTexts(knowledgeBase.id));
   if (collision && !input.allowQuestionCollision) throw new Error(`问法“${collision}”已存在于其他卡片。`);
-  sqlite.prepare("INSERT INTO cards (id, question, question_variants, answer, answer_points, note, track, tags, difficulty, source, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .run(id, question, questionVariantsToJson(question, questionVariants), answer, answerPointsToJson(answerPoints), input.note?.trim() ?? "", track, toTags(resolveTagKeys(withTrackTag(track, input.tags))), input.difficulty, input.source ?? null, input.status ?? "learning", now, now);
+  sqlite.prepare("INSERT INTO cards (id, question, question_variants, answer, answer_points, note, track, knowledge_base_id, tags, difficulty, source, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .run(id, question, questionVariantsToJson(question, questionVariants), answer, answerPointsToJson(answerPoints), input.note?.trim() ?? "", track, knowledgeBase.id, toTags(resolveTagKeys(withTrackTag(track, input.tags))), input.difficulty, input.source ?? null, input.status ?? "learning", now, now);
   replaceCardRelations(id, relations);
   return getCard(id)!;
 }
@@ -101,22 +112,23 @@ export function createTutorialCard() {
   });
 }
 
-export function updateCard(id: string, input: Pick<Card, "question" | "questionVariants" | "relations" | "answerPoints" | "note" | "track" | "tags" | "difficulty">) {
+export function updateCard(id: string, input: Pick<Card, "question" | "questionVariants" | "relations" | "answerPoints" | "note" | "track" | "tags" | "difficulty"> & { knowledgeBaseId?: string }) {
   const card = getCard(id);
   if (!card) return undefined;
   const relations = normalizeCardRelations(input.relations, id);
   assertRelatedCardsExist(relations);
   const question = input.question.trim().replace(/\s+/g, " ");
-  const track = input.track.trim();
+  const knowledgeBase = resolveKnowledgeBase(input);
+  const track = knowledgeBase.name;
   const questionVariants = normalizeQuestionVariants(question, input.questionVariants);
   const answerPoints = input.answerPoints.filter((point) => point.content.trim());
   const hierarchyError = answerPointHierarchyError(answerPoints);
   if (hierarchyError) throw new Error(hierarchyError);
   if (!hasCoreAnswerPoint(answerPoints)) throw new Error("请至少填写一条核心答案要点。");
-  const collision = findQuestionCollision(question, questionVariants, existingQuestionTexts(id));
+  const collision = findQuestionCollision(question, questionVariants, existingQuestionTexts(knowledgeBase.id, id));
   if (collision && card.source !== "tutorial") throw new Error(`问法“${collision}”已存在于其他卡片。`);
-  sqlite.prepare("UPDATE cards SET question = ?, question_variants = ?, answer = ?, answer_points = ?, note = ?, track = ?, tags = ?, difficulty = ?, updated_at = ? WHERE id = ?")
-    .run(question, questionVariantsToJson(question, questionVariants), answerFromPoints(answerPoints), answerPointsToJson(answerPoints), input.note.trim(), track, toTags(resolveTagKeys(withTrackTag(track, input.tags))), input.difficulty, new Date().toISOString(), id);
+  sqlite.prepare("UPDATE cards SET question = ?, question_variants = ?, answer = ?, answer_points = ?, note = ?, track = ?, knowledge_base_id = ?, tags = ?, difficulty = ?, updated_at = ? WHERE id = ?")
+    .run(question, questionVariantsToJson(question, questionVariants), answerFromPoints(answerPoints), answerPointsToJson(answerPoints), input.note.trim(), track, knowledgeBase.id, toTags(resolveTagKeys(withTrackTag(track, input.tags))), input.difficulty, new Date().toISOString(), id);
   replaceCardRelations(id, relations);
   return getCard(id);
 }
@@ -136,8 +148,9 @@ export function updateCardsBulk(ids: string[], action: "archive" | "restore" | "
       if (action === "archive") sqlite.prepare("UPDATE cards SET status = 'archived', updated_at = ? WHERE id = ?").run(now, id);
       if (action === "restore") sqlite.prepare("UPDATE cards SET status = CASE WHEN EXISTS (SELECT 1 FROM review_state WHERE card_id = ?) THEN 'review' ELSE 'learning' END, updated_at = ? WHERE id = ?").run(id, now, id);
       if (action === "move" && typeof value === "string" && value.trim()) {
-        const track = value.trim();
-        sqlite.prepare("UPDATE cards SET track = ?, tags = ?, updated_at = ? WHERE id = ?").run(track, toTags(resolveTagKeys(withTrackTag(track, card.tags))), now, id);
+        const knowledgeBase = getKnowledgeBase(value) ?? findKnowledgeBaseByName(value) ?? getOrCreateKnowledgeBase(value);
+        const track = knowledgeBase.name;
+        sqlite.prepare("UPDATE cards SET track = ?, knowledge_base_id = ?, tags = ?, updated_at = ? WHERE id = ?").run(track, knowledgeBase.id, toTags(resolveTagKeys(withTrackTag(track, card.tags))), now, id);
       }
       if (action === "addTags" && Array.isArray(value)) sqlite.prepare("UPDATE cards SET tags = ?, updated_at = ? WHERE id = ?").run(toTags([...new Set([...card.tags, ...resolveTagKeys(value)])]), now, id);
     }
@@ -169,18 +182,22 @@ export function permanentlyDeleteCards(ids: string[]) {
 export async function importCards(raw: Array<Pick<Card, "question" | "answer" | "track" | "tags" | "difficulty"> & { questionVariants?: QuestionVariant[]; answerPoints?: AnswerPoint[] }>) {
   const existingCards = listCards();
   const normalized = raw.map((card) => ({ ...card, answer: card.answer || answerFromPoints(card.answerPoints ?? []) }));
-  const preview = previewImport(normalized, existingCards.flatMap(allQuestionTexts));
-  const similar = await findSimilarImportQuestions(normalized, existingCards);
   const pointsByQuestion = new Map(raw.map((card) => [card.question.trim().toLowerCase(), card.answerPoints]));
-  const rejected = [...preview.rejected];
-  const accepted = preview.accepted.flatMap((card) => {
-    const index = normalized.findIndex((item) => item.question === card.question && item.answer === card.answer);
-    const match = similar.get(index);
-    if (match) {
-      rejected.push({ question: card.question, reason: `与${match.source === "library" ? "题库" : "本次导入"}问题“${match.question}”语义相似度 ${Math.round(match.score * 100)}%` });
-      return [];
+  const rejected: Array<{ question: string; reason: string }> = [];
+  const accepted: Card[] = [];
+  const tracks = [...new Set(normalized.map((card) => card.track.trim().toLocaleLowerCase()))];
+  for (const trackKey of tracks) {
+    const group = normalized.filter((card) => card.track.trim().toLocaleLowerCase() === trackKey);
+    const existing = existingCards.filter((card) => card.track.trim().toLocaleLowerCase() === trackKey);
+    const preview = previewImport(group, existing.flatMap(allQuestionTexts));
+    const similar = await findSimilarImportQuestions(group, existing);
+    rejected.push(...preview.rejected);
+    for (const card of preview.accepted) {
+      const index = group.findIndex((item) => item.question === card.question && item.answer === card.answer);
+      const match = similar.get(index);
+      if (match) { rejected.push({ question: card.question, reason: `与${match.source === "library" ? "题库" : "本次导入"}问题“${match.question}”语义相似度 ${Math.round(match.score * 100)}%` }); continue; }
+      accepted.push(createCard({ ...card, answerPoints: pointsByQuestion.get(card.question.trim().toLowerCase()) }));
     }
-    return [createCard({ ...card, answerPoints: pointsByQuestion.get(card.question.trim().toLowerCase()) })];
-  });
+  }
   return { accepted, rejected };
 }

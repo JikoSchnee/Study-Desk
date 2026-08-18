@@ -1,8 +1,9 @@
 import "server-only";
 import { sqlite } from "@/lib/db";
+import { randomUUID } from "node:crypto";
 
-export const BACKUP_VERSION = 7;
-const tables = ["cards", "card_relations", "review_state", "review_logs", "initial_study_logs", "daily_plans", "daily_tasks", "daily_reports", "daily_report_items", "interview_sessions", "interview_turns", "knowledge_maintenance_proposals", "knowledge_sync_records", "practice_focus", "settings", "tags"] as const;
+export const BACKUP_VERSION = 8;
+const tables = ["knowledge_bases", "study_plans", "study_plan_knowledge_bases", "cards", "card_relations", "review_state", "review_logs", "initial_study_logs", "daily_plans", "daily_tasks", "daily_reports", "daily_report_items", "interview_sessions", "interview_turns", "knowledge_maintenance_proposals", "knowledge_sync_records", "practice_focus", "settings", "tags"] as const;
 type BackupTable = (typeof tables)[number];
 export type AppBackup = { version: number; exportedAt: string; tables: Record<BackupTable, Record<string, unknown>[]> };
 
@@ -26,16 +27,16 @@ export function createBackup(): AppBackup {
 export function parseBackup(value: unknown): AppBackup {
   if (!value || typeof value !== "object") throw new Error("备份文件不是有效 JSON 对象。");
   const backup = value as Partial<AppBackup>;
-  if ((backup.version !== 1 && backup.version !== 2 && backup.version !== 3 && backup.version !== 4 && backup.version !== 5 && backup.version !== 6 && backup.version !== BACKUP_VERSION) || !backup.tables || typeof backup.tables !== "object") throw new Error("不支持此备份版本。");
-  const legacyTables = tables.filter((table) => table !== "card_relations" && table !== "initial_study_logs" && table !== "daily_reports" && table !== "daily_report_items" && table !== "tags");
+  if (![1, 2, 3, 4, 5, 6, 7, BACKUP_VERSION].includes(Number(backup.version)) || !backup.tables || typeof backup.tables !== "object") throw new Error("不支持此备份版本。");
+  const legacyTables = tables.filter((table) => !["knowledge_bases", "study_plans", "study_plan_knowledge_bases", "card_relations", "initial_study_logs", "daily_reports", "daily_report_items", "tags"].includes(table));
   for (const table of legacyTables) if (!Array.isArray(backup.tables[table])) throw new Error(`备份缺少 ${table} 数据。`);
-  if (backup.version >= 3 && !Array.isArray(backup.tables.card_relations)) throw new Error("备份缺少 card_relations 数据。");
-  if (backup.version >= 5 && !Array.isArray(backup.tables.initial_study_logs)) throw new Error("备份缺少 initial_study_logs 数据。");
+  if (Number(backup.version) >= 3 && !Array.isArray(backup.tables.card_relations)) throw new Error("备份缺少 card_relations 数据。");
+  if (Number(backup.version) >= 5 && !Array.isArray(backup.tables.initial_study_logs)) throw new Error("备份缺少 initial_study_logs 数据。");
   if (backup.version === BACKUP_VERSION && (!Array.isArray(backup.tables.daily_reports) || !Array.isArray(backup.tables.daily_report_items))) throw new Error("备份缺少日报数据。");
-  return { version: BACKUP_VERSION, exportedAt: backup.exportedAt ?? new Date().toISOString(), tables: { ...backup.tables, card_relations: Array.isArray(backup.tables.card_relations) ? backup.tables.card_relations : [], initial_study_logs: Array.isArray(backup.tables.initial_study_logs) ? backup.tables.initial_study_logs : [], daily_reports: Array.isArray(backup.tables.daily_reports) ? backup.tables.daily_reports : [], daily_report_items: Array.isArray(backup.tables.daily_report_items) ? backup.tables.daily_report_items : [], tags: Array.isArray(backup.tables.tags) ? backup.tables.tags : [] } } as AppBackup;
+  return { version: BACKUP_VERSION, exportedAt: backup.exportedAt ?? new Date().toISOString(), tables: { ...backup.tables, knowledge_bases: Array.isArray(backup.tables.knowledge_bases) ? backup.tables.knowledge_bases : [], study_plans: Array.isArray(backup.tables.study_plans) ? backup.tables.study_plans : [], study_plan_knowledge_bases: Array.isArray(backup.tables.study_plan_knowledge_bases) ? backup.tables.study_plan_knowledge_bases : [], card_relations: Array.isArray(backup.tables.card_relations) ? backup.tables.card_relations : [], initial_study_logs: Array.isArray(backup.tables.initial_study_logs) ? backup.tables.initial_study_logs : [], daily_reports: Array.isArray(backup.tables.daily_reports) ? backup.tables.daily_reports : [], daily_report_items: Array.isArray(backup.tables.daily_report_items) ? backup.tables.daily_report_items : [], tags: Array.isArray(backup.tables.tags) ? backup.tables.tags : [] } } as AppBackup;
 }
 
-const primaryKey: Record<Exclude<BackupTable, "card_relations">, string> = { cards: "id", review_state: "card_id", review_logs: "id", initial_study_logs: "card_id", daily_plans: "date", daily_tasks: "id", daily_reports: "report_date", daily_report_items: "task_id", interview_sessions: "id", interview_turns: "id", knowledge_maintenance_proposals: "id", knowledge_sync_records: "id", practice_focus: "card_id", settings: "key", tags: "id" };
+const primaryKey: Record<Exclude<BackupTable, "card_relations" | "study_plan_knowledge_bases">, string> = { knowledge_bases: "id", study_plans: "id", cards: "id", review_state: "card_id", review_logs: "id", initial_study_logs: "card_id", daily_plans: "date", daily_tasks: "id", daily_reports: "report_date", daily_report_items: "task_id", interview_sessions: "id", interview_turns: "id", knowledge_maintenance_proposals: "id", knowledge_sync_records: "id", practice_focus: "card_id", settings: "key", tags: "id" };
 
 function insert(table: BackupTable, row: Record<string, unknown>) {
   const keys = Object.keys(row);
@@ -68,11 +69,15 @@ export function restoreBackup(backup: AppBackup, mode: "merge" | "replace") {
         }
         continue;
       }
+      if (table === "study_plan_knowledge_bases") {
+        for (const row of backup.tables[table]) sqlite.prepare("INSERT OR IGNORE INTO study_plan_knowledge_bases (plan_id, knowledge_base_id, created_at) VALUES (?, ?, ?)").run(row.plan_id, row.knowledge_base_id, row.created_at);
+        continue;
+      }
       const key = primaryKey[table];
       for (const row of backup.tables[table]) {
         const existing = sqlite.prepare(`SELECT * FROM ${table} WHERE ${key} = ?`).get(row[key]) as Record<string, unknown> | undefined;
         if (!existing) { insert(table, row); continue; }
-        if (table === "cards" && String(row.updated_at ?? "") > String(existing.updated_at ?? "")) {
+        if ((table === "cards" || table === "knowledge_bases" || table === "study_plans") && String(row.updated_at ?? "") > String(existing.updated_at ?? "")) {
           const keys = Object.keys(row).filter((column) => column !== key);
           sqlite.prepare(`UPDATE ${table} SET ${keys.map((column) => `${column} = ?`).join(", ")} WHERE ${key} = ?`).run(...keys.map((column) => row[column]), row[key]);
         }
@@ -80,5 +85,15 @@ export function restoreBackup(backup: AppBackup, mode: "merge" | "replace") {
     }
   });
   transaction();
+  const now = new Date().toISOString();
+  const missingTracks = sqlite.prepare("SELECT DISTINCT TRIM(track) AS name FROM cards WHERE (knowledge_base_id IS NULL OR knowledge_base_id = '') AND TRIM(track) <> ''").all() as Array<{ name: string }>;
+  for (const item of missingTracks) sqlite.prepare("INSERT OR IGNORE INTO knowledge_bases (id, name, description, created_at, updated_at) VALUES (?, ?, '', ?, ?)").run(randomUUID(), item.name, now, now);
+  sqlite.prepare("UPDATE cards SET knowledge_base_id = (SELECT id FROM knowledge_bases WHERE name = TRIM(cards.track)) WHERE knowledge_base_id IS NULL OR knowledge_base_id = ''").run();
+  if (!(sqlite.prepare("SELECT id FROM study_plans LIMIT 1").get())) {
+    const planId = randomUUID();
+    sqlite.prepare("INSERT INTO study_plans (id, name, description, created_at, updated_at) VALUES (?, '全部知识', '包含恢复数据中的全部知识库。', ?, ?)").run(planId, now, now);
+    sqlite.prepare("INSERT INTO study_plan_knowledge_bases (plan_id, knowledge_base_id, created_at) SELECT ?, id, ? FROM knowledge_bases").run(planId, now);
+    sqlite.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('activeStudyPlanId', ?)").run(planId);
+  }
   return createBackup();
 }

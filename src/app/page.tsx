@@ -16,6 +16,7 @@ type DashboardData = {
   tasks: DailyTask[];
   report: DailyLearningReport | null;
   totals: { dueReview: number; reviewedToday: number; completed: number };
+  activePlan: { id: string; name: string; ready: boolean } | null;
 };
 
 function TutorialLauncher({ onLaunch }: { onLaunch: () => void }) {
@@ -102,10 +103,11 @@ export default function TodayPage() {
   const activeGoals = goals.filter((goal) => goal.total > 0);
   const completedGoals = activeGoals.filter((goal) => goal.complete).length;
   const totalPercent = activeGoals.length ? Math.round((completedGoals / activeGoals.length) * 100) : 0;
+  const planReady = Boolean(data.activePlan?.ready);
   return <>
     <HomeTutorialDialog open={tutorialOpen} onClose={() => setTutorialOpen(false)} />
     <section className="today-hero">
-      <div><p className="eyebrow"><Flame size={15}/> 今天的训练</p><h1>即刻开始</h1><p>从一个小问题开始，今天也能让表达更清楚一点。</p><div className="hero-actions"><Link href="/review?queue=initial"><Button><BookOpen size={17}/> 学习</Button></Link><Link href="/review?queue=review"><Button variant="secondary"><RefreshCw size={17}/> 复习</Button></Link><span className="disabled-interview-action" title="模拟面试暂未开放" aria-label="模拟面试暂未开放"><Button variant="outline" disabled><Mic2 size={17}/> 模拟面试</Button><span className="disabled-interview-badge" aria-hidden="true"><CircleOff size={15}/></span></span><TourButton tour="today" /></div></div>
+      <div><p className="eyebrow"><Flame size={15}/> 今天的训练{data.activePlan ? ` · ${data.activePlan.name}` : ""}</p><h1>即刻开始</h1><p>{planReady ? "从一个小问题开始，今天也能让表达更清楚一点。" : "先在学习页创建计划书并添加知识库，再开始今天的训练。"}</p><div className="hero-actions">{planReady ? <><Link href="/review?queue=initial"><Button><BookOpen size={17}/> 学习</Button></Link><Link href="/review?queue=review"><Button variant="secondary"><RefreshCw size={17}/> 复习</Button></Link></> : <Link href="/review"><Button><BookOpen size={17}/> 配置计划书</Button></Link>}<span className="disabled-interview-action" title="模拟面试暂未开放" aria-label="模拟面试暂未开放"><Button variant="outline" disabled><Mic2 size={17}/> 模拟面试</Button><span className="disabled-interview-badge" aria-hidden="true"><CircleOff size={15}/></span></span><TourButton tour="today" /></div></div>
       <div className="hero-summary" data-tour="today-summary" aria-label="今日复习概况"><div className="hero-stat"><strong>{data.totals.dueReview}</strong><span>此刻待复习</span></div><div className="hero-stat"><strong>{data.totals.reviewedToday}</strong><span>今日已复习</span></div><div className="hero-stat"><strong>{totalPercent}%</strong><span>目标完成</span></div></div>
     </section>
     <div className="two-column" style={{ marginTop: 20 }}>

@@ -74,13 +74,23 @@ export async function previewWorkbook(file: File, sheetName: string, mapping: Im
     };
   }).filter((row) => row.hasContent);
   const parsedRows = raw.map((row) => ({ ...row, questionVariants: questionVariantsFromText(row.variants) }));
-  const dedupe = previewImport(parsedRows, existingCards.flatMap(allQuestionTexts));
-  const similar = await findSimilarImportQuestions(parsedRows, existingCards);
-  const accepted = new Set(dedupe.accepted.map((row) => `${row.question}\u0000${row.answer}`));
-  const rejected = new Map(dedupe.rejected.map((row) => [row.question.trim().toLowerCase(), row.reason]));
+  const accepted = new Set<string>();
+  const rejected = new Map<string, string>();
+  const similar = new Map<number, Awaited<ReturnType<typeof findSimilarImportQuestions>> extends Map<number, infer Match> ? Match : never>();
+  for (const track of [...new Set(parsedRows.map((row) => row.track.trim().toLocaleLowerCase()))]) {
+    const indices = parsedRows.flatMap((row, index) => row.track.trim().toLocaleLowerCase() === track ? [index] : []);
+    const group = indices.map((index) => parsedRows[index]);
+    const existing = existingCards.filter((card) => card.track.trim().toLocaleLowerCase() === track);
+    const dedupe = previewImport(group, existing.flatMap(allQuestionTexts));
+    dedupe.accepted.forEach((row) => accepted.add(`${track}\u0000${row.question}\u0000${row.answer}`));
+    dedupe.rejected.forEach((row) => rejected.set(`${track}\u0000${row.question.trim().toLowerCase()}`, row.reason));
+    const groupSimilar = await findSimilarImportQuestions(group, existing);
+    for (const [groupIndex, match] of groupSimilar) similar.set(indices[groupIndex], match);
+  }
   const preview: ImportPreviewRow[] = raw.map((row, index) => {
-    const key = `${row.question}\u0000${row.answer}`;
-    const reason = rejected.get(row.question.trim().toLowerCase());
+    const trackKey = row.track.trim().toLocaleLowerCase();
+    const key = `${trackKey}\u0000${row.question}\u0000${row.answer}`;
+    const reason = rejected.get(`${trackKey}\u0000${row.question.trim().toLowerCase()}`);
     const similarMatch = similar.get(index);
     const semanticReason = similarMatch ? `与${similarMatch.source === "library" ? "题库" : "导入文件中较早的"}问题“${similarMatch.question}”语义相似度 ${Math.round(similarMatch.score * 100)}%` : undefined;
     const status = accepted.has(key) ? similarMatch ? "duplicate" : "valid" : reason?.includes("已存在") ? "duplicate" : "invalid";

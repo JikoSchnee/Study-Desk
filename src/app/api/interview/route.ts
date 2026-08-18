@@ -6,6 +6,7 @@ import { getCard, listCards } from "@/lib/cards";
 import { evaluateAnswer, generateFollowUpCardDraft, generateFollowUpQuestion } from "@/lib/ai";
 import { allQuestionTexts, pickPresentedQuestion } from "@/lib/question-variants";
 import { getAppSettings } from "@/lib/settings";
+import { activePlanCardIds } from "@/lib/study-plans";
 
 const startSchema = z.object({ action: z.literal("start"), cardIds: z.array(z.string().uuid()).optional(), mode: z.enum(["real", "practice"]).default("real") });
 const answerSchema = z.object({ action: z.literal("answer"), sessionId: z.string().uuid(), turnId: z.string().uuid(), answer: z.string().min(1), comparisonMode: z.enum(["embedding", "llm"]).optional(), comparisonProgressId: z.string().min(1).optional() });
@@ -24,7 +25,8 @@ export async function POST(request: Request) {
   const body = await request.json();
   if (body.action === "start") {
     const input = startSchema.parse(body);
-    const cards = input.cardIds?.map(getCard).filter(Boolean) ?? listCards().filter((card) => card.status !== "archived");
+    const allowed = activePlanCardIds();
+    const cards = (input.cardIds?.map(getCard).filter(Boolean) ?? listCards().filter((card) => card.status !== "archived")).filter((card) => card && allowed.has(card.id));
     if (!cards.length) return NextResponse.json({ error: "请先创建至少一张卡片" }, { status: 400 });
     const sessionId = randomUUID();
     sqlite.prepare("INSERT INTO interview_sessions (id, config, status, started_at) VALUES (?, ?, 'active', ?)").run(sessionId, JSON.stringify({ cardIds: cards.map((card) => card!.id), mode: input.mode, cursor: 0 }), new Date().toISOString());
@@ -64,6 +66,7 @@ export async function POST(request: Request) {
   const turn = sqlite.prepare("SELECT * FROM interview_turns WHERE id = ? AND session_id = ?").get(input.turnId, input.sessionId) as { card_id: string; question: string; is_extension: number } | undefined;
   if (!turn) return NextResponse.json({ error: "找不到面试轮次" }, { status: 404 });
   const card = getCard(turn.card_id)!;
+  if (!activePlanCardIds().has(card.id)) return NextResponse.json({ error: "这张卡片不属于当前计划书。" }, { status: 403 });
   const evaluation = await evaluateAnswer({ ...card, question: turn.question }, input.answer, input.comparisonMode ?? getAppSettings().answerComparisonMode, input.comparisonProgressId);
   const otherQuestions = allQuestionTexts(card).filter((question) => question !== turn.question);
   sqlite.prepare("UPDATE interview_turns SET answer = ?, score = ?, feedback = ?, comparison_mode = ?, answer_comparison = ? WHERE id = ?").run(input.answer, evaluation.score, evaluation.feedback, evaluation.comparison.requestedMode, JSON.stringify(evaluation.comparison), input.turnId);

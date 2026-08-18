@@ -8,6 +8,7 @@ import { completeTodayTaskForCard, ensureDailyPlan, listActiveDailyTasks } from 
 import { clearPriorityPractice, focusedCards, isPriorityPractice } from "@/lib/practice-focus";
 import { refreshDailyLearningReport } from "@/lib/daily-reports";
 import type { AnswerComparison, Card, RatingName } from "@/lib/types";
+import { activePlanCardIds } from "@/lib/study-plans";
 
 export type ReviewQueueKind = "initial" | "review" | "weak";
 export type QueueProgress = { pending: number; completedToday: number };
@@ -52,6 +53,7 @@ function hasRealPractice(cardId: string) {
 
 /** Marks a card as studied without treating reading as a scored review. Safe to retry. */
 export function completeInitialStudy(cardId: string) {
+  if (!activePlanCardIds().has(cardId)) throw new Error("这张卡片不属于当前计划书。");
   const card = getCard(cardId);
   if (!card) throw new Error("找不到卡片。");
   const existing = sqlite.prepare("SELECT completed_at FROM initial_study_logs WHERE card_id = ?").get(cardId) as { completed_at: string } | undefined;
@@ -75,13 +77,15 @@ export function completeInitialStudy(cardId: string) {
 }
 
 export function initialCards() {
-  return listCards().filter((card) => card.status === "learning").sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+  const allowed = activePlanCardIds();
+  return listCards().filter((card) => allowed.has(card.id) && card.status === "learning").sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
 }
 
 export function dueCards() {
+  const allowed = activePlanCardIds();
   const now = new Date().toISOString();
   const rows = sqlite.prepare(`SELECT c.id FROM cards c JOIN review_state r ON r.card_id = c.id WHERE c.status = 'review' AND r.due_at <= ? ORDER BY r.due_at ASC, c.id ASC`).all(now) as Array<{ id: string }>;
-  return rows.map((row) => getCard(row.id)).filter((card): card is Card => Boolean(card));
+  return rows.filter((row) => allowed.has(row.id)).map((row) => getCard(row.id)).filter((card): card is Card => Boolean(card));
 }
 
 /** The guided queues follow today's generated plan; free practice remains separate. */
@@ -104,7 +108,8 @@ export function reviewQueueProgress(): ReviewQueueProgress {
     pending: tasks.filter((task) => task.kind === kind && task.status === "todo").length,
     completedToday: tasks.filter((task) => task.kind === kind && task.status === "done").length,
   });
-  const weak = focusedCards("weak").length;
+  const allowed = activePlanCardIds();
+  const weak = focusedCards("weak").filter((card) => allowed.has(card.id)).length;
   return {
     initial: progressFor("learn"),
     review: progressFor("review"),
@@ -113,12 +118,14 @@ export function reviewQueueProgress(): ReviewQueueProgress {
 }
 
 export function nextReviewCard(kind: ReviewQueueKind, requestedCardId?: string | null) {
-  const base = kind === "initial" || kind === "review" ? plannedCards(kind) : focusedCards("weak");
+  const allowed = activePlanCardIds();
+  const base = kind === "initial" || kind === "review" ? plannedCards(kind) : focusedCards("weak").filter((card) => allowed.has(card.id));
   const cards = kind === "weak" ? base : [...base.filter((card) => isPriorityPractice(card.id)), ...base.filter((card) => !isPriorityPractice(card.id))];
   return { card: (requestedCardId ? cards.find((card) => card.id === requestedCardId) : undefined) ?? cards[0] ?? null, pending: cards.length, progress: reviewQueueProgress() };
 }
 
 export function submitReview(cardId: string, response: string, score: number, suggestedRating: RatingName, confirmedRating: RatingName, comparison?: AnswerComparison, presentedQuestion?: string, feedback?: string) {
+  if (!activePlanCardIds().has(cardId)) throw new Error("这张卡片不属于当前计划书。");
   const isInitial = !hasRealPractice(cardId);
   initializeReview(cardId);
   const reviewedAt = new Date().toISOString();
