@@ -3,6 +3,8 @@ export {};
 type ManualUpdateStatus =
   | { state: "current"; currentVersion: string; latestVersion: string; url: string; releaseNotes: string }
   | { state: "available"; currentVersion: string; latestVersion: string; url: string; releaseNotes: string }
+  | { state: "downloading"; currentVersion: string; latestVersion: string; url: string; releaseNotes: string; percent: number }
+  | { state: "downloaded"; currentVersion: string; latestVersion: string; url: string; releaseNotes: string }
   | { state: "error"; currentVersion: string; message: string; url?: string };
 
 type DesktopNetworkCheck = {
@@ -33,6 +35,10 @@ declare global {
       };
       updates: {
         check(): Promise<ManualUpdateStatus>;
+        status(): Promise<ManualUpdateStatus | null>;
+        download(): Promise<ManualUpdateStatus>;
+        install(): Promise<void>;
+        onStatus(listener: (status: ManualUpdateStatus) => void): () => void;
       };
       network: {
         diagnostics(): Promise<DesktopNetworkDiagnostics>;

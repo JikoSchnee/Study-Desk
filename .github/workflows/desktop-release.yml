@@ -51,6 +51,13 @@ jobs:
       - run: npm ci
       - name: Build Windows application
         run: npm run desktop:dist -- --win --x64
+      - name: Verify Windows update artifacts
+        shell: pwsh
+        run: |
+          Get-ChildItem release
+          if (-not (Test-Path "release/latest.yml")) { throw "Missing latest.yml update manifest." }
+          if (-not (Get-ChildItem "release/Study-Desk-Setup-*.exe")) { throw "Missing NSIS installer." }
+          if (-not (Get-ChildItem "release/Study-Desk-Setup-*.exe.blockmap")) { throw "Missing NSIS blockmap." }
       - uses: actions/upload-artifact@v4
         with:
           name: windows-release

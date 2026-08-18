@@ -15,6 +15,14 @@ contextBridge.exposeInMainWorld("mockInterviewDesktop", {
   },
   updates: {
     check: () => ipcRenderer.invoke("updates:check"),
+    status: () => ipcRenderer.invoke("updates:status"),
+    download: () => ipcRenderer.invoke("updates:download"),
+    install: () => ipcRenderer.invoke("updates:install"),
+    onStatus: (listener) => {
+      const callback = (_event, status) => listener(status);
+      ipcRenderer.on("updates:status", callback);
+      return () => ipcRenderer.removeListener("updates:status", callback);
+    },
   },
   network: {
     diagnostics: () => ipcRenderer.invoke("network:diagnostics"),

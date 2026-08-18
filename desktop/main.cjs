@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, net: electronNet, powerMonitor, session, utilityProcess, safeStorage } = require("electron");
+const { autoUpdater } = require("electron-updater");
 const { existsSync, readFileSync, writeFileSync, unlinkSync } = require("node:fs");
 const http = require("node:http");
 const net = require("node:net");
@@ -17,6 +18,40 @@ const networkChecks = [
   { id: "huggingface", label: "Hugging Face", url: "https://huggingface.co/" },
 ];
 const networkTimeoutMs = 8_000;
+const updaterSupported = process.platform === "win32" && app.isPackaged;
+let updateStatus = null;
+let updateCheckPromise = null;
+
+function releaseNotes(value) {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (Array.isArray(value)) return value.map((item) => typeof item?.note === "string" ? item.note : "").filter(Boolean).join("\n\n") || "此版本暂未提供更新说明。";
+  return "此版本暂未提供更新说明。";
+}
+function emitUpdateStatus(next) {
+  updateStatus = next;
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("updates:status", next);
+  return next;
+}
+function updaterError(error) {
+  return emitUpdateStatus({ state: "error", currentVersion: app.getVersion(), message: `更新失败：${error instanceof Error ? error.message : "未知错误"}`, url: releasesUrl });
+}
+function configureAutoUpdater() {
+  if (!updaterSupported) return;
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.allowPrerelease = false;
+  autoUpdater.on("update-available", (info) => emitUpdateStatus({ state: "available", currentVersion: app.getVersion(), latestVersion: info.version, url: releasesUrl, releaseNotes: releaseNotes(info.releaseNotes) }));
+  autoUpdater.on("update-not-available", (info) => emitUpdateStatus({ state: "current", currentVersion: app.getVersion(), latestVersion: info.version, url: releasesUrl, releaseNotes: releaseNotes(info.releaseNotes) }));
+  autoUpdater.on("download-progress", (progress) => emitUpdateStatus({ state: "downloading", currentVersion: app.getVersion(), latestVersion: updateStatus?.latestVersion ?? "", url: releasesUrl, releaseNotes: updateStatus?.releaseNotes ?? "此版本暂未提供更新说明。", percent: Math.min(100, Math.max(0, progress.percent)) }));
+  autoUpdater.on("update-downloaded", (info) => emitUpdateStatus({ state: "downloaded", currentVersion: app.getVersion(), latestVersion: info.version, url: releasesUrl, releaseNotes: releaseNotes(info.releaseNotes) }));
+  autoUpdater.on("error", updaterError);
+}
+async function checkForDesktopUpdate() {
+  if (!updaterSupported) return null;
+  if (updateCheckPromise) return updateCheckPromise;
+  updateCheckPromise = autoUpdater.checkForUpdates().then(() => updateStatus).catch((error) => updaterError(error)).finally(() => { updateCheckPromise = null; });
+  return updateCheckPromise;
+}
 
 function userHome() { return path.join(app.getPath("userData"), "runtime"); }
 function syncCredentialPath() { return path.join(app.getPath("userData"), "webdav-sync-credential.bin"); }
@@ -297,6 +332,7 @@ ipcMain.handle("supabase-sync:save-session", async (_event, value) => {
 });
 ipcMain.handle("updates:check", async () => {
   const currentVersion = app.getVersion();
+  if (updaterSupported) return await checkForDesktopUpdate();
   try {
     const release = await fetchLatestRelease();
     if (!release?.tag_name) throw new Error("GitHub 未返回有效的版本号。");
@@ -311,6 +347,19 @@ ipcMain.handle("updates:check", async () => {
   } catch (error) {
     return { state: "error", currentVersion, message: error instanceof Error ? error.message : "检查更新失败，请直接前往 Releases 下载。", url: releasesUrl };
   }
+});
+ipcMain.handle("updates:status", () => updateStatus);
+ipcMain.handle("updates:download", async () => {
+  if (!updaterSupported) throw new Error("应用内更新仅在已安装的 Windows 客户端中可用。");
+  if (updateStatus?.state === "downloaded") return updateStatus;
+  if (updateStatus?.state !== "available" && updateStatus?.state !== "downloading") throw new Error("请先检查并确认有可用更新。");
+  try { await autoUpdater.downloadUpdate(); return updateStatus; } catch (error) { return updaterError(error); }
+});
+ipcMain.handle("updates:install", () => {
+  if (!updaterSupported) throw new Error("应用内更新仅在已安装的 Windows 客户端中可用。");
+  if (updateStatus?.state !== "downloaded") throw new Error("更新尚未下载完成。");
+  isQuitting = true;
+  autoUpdater.quitAndInstall(false, true);
 });
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) app.quit();
@@ -328,8 +377,9 @@ app.on("second-instance", (_event, commandLine) => {
 
 app.whenReady().then(async () => {
   if (!gotSingleInstanceLock) return;
+  configureAutoUpdater();
   registerDeepLinkProtocol();
-  try { await startServer(); createWindow(); if (pendingMagicLink) { const callback = pendingMagicLink; pendingMagicLink = null; void acceptSupabaseMagicLink(callback); } }
+  try { await startServer(); createWindow(); if (pendingMagicLink) { const callback = pendingMagicLink; pendingMagicLink = null; void acceptSupabaseMagicLink(callback); } if (updaterSupported) void checkForDesktopUpdate(); }
   catch (error) { console.error(error); app.quit(); }
 });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
