@@ -21,7 +21,9 @@ Magic Link 邮件模板必须保留 `{{ .ConfirmationURL }}`。
 
 ## 2. 创建 Vercel 项目
 
-将此仓库导入 Vercel，Framework Preset 选择 Next.js。为 Production、Preview、Development 配置：
+将此仓库导入 Vercel，Framework Preset 选择 Next.js，Root Directory 保持仓库根目录。仓库中的 `vercel.json` 会执行 `npm run build:vercel`，只构建 `vercel-service` 的单个云函数；不要把 Build Command 手动覆盖回 `npm run build`，否则 Electron 的本机 API 路由也会被部署，并超过 Hobby 套餐的函数数量限制。
+
+为 Production、Preview、Development 配置：
 
 ```text
 SUPABASE_URL=https://你的项目.supabase.co

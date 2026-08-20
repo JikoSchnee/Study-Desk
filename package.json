@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:vercel": "next build vercel-service",
     "desktop:prepare": "node desktop/prepare-next.cjs",
     "desktop:rebuild": "node desktop/rebuild-native.cjs",
     "desktop:sync-native": "node desktop/sync-native.cjs",
