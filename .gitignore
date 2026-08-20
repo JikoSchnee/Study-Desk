@@ -1,6 +1,6 @@
 node_modules
 .next
-release
+/release/
 apps/desktop/electron/dist
 .cache/
 Quizlet-Anki-资料/
