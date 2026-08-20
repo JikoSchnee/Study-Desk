@@ -1,0 +1,70 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { Cloud, Crown, Download, KeyRound, LockKeyhole, Mail, RefreshCw, ShieldCheck, Sparkles, Upload } from "lucide-react";
+import { Button, Panel } from "@/components/ui";
+import { fetchJson } from "@/lib/client-api";
+
+type Membership = { state: "free" | "trial" | "active" | "grace" | "expired"; trialAvailable: boolean; activeUntil: string | null; graceEndsAt: string | null; cloudDeleteAt: string | null; canReadCloud: boolean; canWriteCloud: boolean; quotaBytes: number; usedBytes: number };
+type Overview = { membership: Membership; catalog: { monthly: { amountCents: number; days: number }; yearly: { amountCents: number; days: number } }; paddle: { environment: "sandbox" | "production"; clientToken: string | null } };
+type RecoveryStatus = { count: number; totalBytes: number; lastBackupAt: string | null; pausedReason: string | null };
+type PaddleWindow = Window & { Paddle?: { Environment: { set(value: "sandbox"): void }; Initialize(input: { token: string }): void; Checkout: { open(input: { transactionId: string; settings?: Record<string, unknown> }): void } } };
+
+let initializedPaddleToken = "";
+
+const formatBytes = (bytes: number) => bytes < 1024 * 1024 ? `${Math.max(0, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+const dateLabel = (value: string | null) => value ? new Date(value).toLocaleString("zh-CN") : "—";
+
+async function loadPaddle() {
+  const target = window as PaddleWindow;
+  if (target.Paddle) return target.Paddle;
+  await new Promise<void>((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>('script[data-study-desk-paddle="true"]');
+    if (existing) { existing.addEventListener("load", () => resolve(), { once: true }); existing.addEventListener("error", () => reject(new Error("无法加载 Paddle 收银台。")), { once: true }); return; }
+    const script = document.createElement("script"); script.src = "https://cdn.paddle.com/paddle/v2/paddle.js"; script.async = true; script.dataset.studyDeskPaddle = "true"; script.onload = () => resolve(); script.onerror = () => reject(new Error("无法加载 Paddle 收银台。")); document.head.appendChild(script);
+  });
+  if (!target.Paddle) throw new Error("Paddle 收银台初始化失败。 ");
+  return target.Paddle;
+}
+
+export function AccountDataPortability() {
+  const [desktop, setDesktop] = useState(false);
+  const [signedIn, setSignedIn] = useState(false);
+  const [email, setEmail] = useState("");
+  const [overview, setOverview] = useState<Overview | null>(null);
+  const [recoveryStatus, setRecoveryStatus] = useState<RecoveryStatus | null>(null);
+  const [busy, setBusy] = useState("");
+  const [notice, setNotice] = useState("");
+  const [preview, setPreview] = useState<{ counts: Record<string, number>; cardConflicts: number; legacy?: boolean } | null>(null);
+  const pollRef = useRef<number | null>(null);
+
+  const readMembership = async () => {
+    const session = await window.mockInterviewDesktop?.supabaseSync.sessionStatus();
+    setSignedIn(Boolean(session?.signedIn));
+    if (!session?.signedIn) { setOverview(null); return; }
+    const data = await fetchJson<Overview>("/api/supabase-sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "membership-status" }), label: "读取会员状态" });
+    setOverview(data);
+  };
+
+  useEffect(() => { setDesktop(Boolean(window.mockInterviewDesktop)); void readMembership().catch((error) => setNotice(error instanceof Error ? error.message : "无法读取会员状态。")); void fetchJson<{ autoBackupStatus?: RecoveryStatus }>("/api/settings", { label: "读取加密恢复点" }).then((data) => setRecoveryStatus(data.autoBackupStatus ?? null)).catch(() => {}); return () => { if (pollRef.current) window.clearInterval(pollRef.current); }; }, []);
+  useEffect(() => window.mockInterviewDesktop?.supabaseSync.onMagicLink((result) => { setNotice(result.message); if (result.ok) void readMembership(); }), []);
+
+  const exportEncrypted = async () => { setBusy("export"); setNotice(""); try { const result = await window.mockInterviewDesktop?.backup.exportEncrypted(); if (result && !result.canceled) setNotice(`已导出 ${result.fileName}。只有 Study Desk 桌面端可以验证并导入。`); } catch (error) { setNotice(error instanceof Error ? error.message : "导出失败。 "); } finally { setBusy(""); } };
+  const chooseImport = async () => { setBusy("import"); setNotice(""); try { const result = await window.mockInterviewDesktop?.backup.chooseImport(); if (result && !result.canceled && result.preview) { setPreview({ ...result.preview, legacy: result.legacy }); setNotice(result.legacy ? "已验证旧版 JSON；恢复后会立即生成加密恢复点。" : "密文与完整性校验通过，请选择恢复方式。 "); } } catch (error) { setNotice(error instanceof Error ? error.message : "迁移文件验证失败。 "); } finally { setBusy(""); } };
+  const restore = async (mode: "merge" | "replace") => { if (mode === "replace" && !window.confirm("替换会清除当前训练数据；应用会先创建加密安全备份。确定继续吗？")) return; setBusy("restore"); try { const result = await window.mockInterviewDesktop?.backup.restore(mode); setNotice(result?.backupWarning ?? "恢复完成，正在刷新数据。 "); window.setTimeout(() => window.location.reload(), result?.backupWarning ? 1_800 : 700); } catch (error) { setNotice(error instanceof Error ? error.message : "恢复失败。 "); } finally { setBusy(""); } };
+  const showRecoveryPoints = async () => { try { const result = await window.mockInterviewDesktop?.backup.showRecoveryPoints(); if (result) setNotice(`已打开本机加密恢复点目录：${result.directory}`); } catch (error) { setNotice(error instanceof Error ? error.message : "无法打开加密恢复点目录。 "); } };
+  const requestLogin = async () => { setBusy("login"); try { await fetchJson("/api/supabase-sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "request-magic-link", email }), label: "发送登录邮件" }); setNotice("登录链接已发送，请在这台电脑上打开邮件。 "); } catch (error) { setNotice(error instanceof Error ? error.message : "登录邮件发送失败。 "); } finally { setBusy(""); } };
+  const startTrial = async () => { setBusy("trial"); try { await fetchJson("/api/supabase-sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "membership-trial" }), label: "开始会员试用" }); await readMembership(); setNotice("7 天会员试用已经开始，账号云同步现已可用。 "); } catch (error) { setNotice(error instanceof Error ? error.message : "无法开始试用。 "); } finally { setBusy(""); } };
+  const checkout = async (plan: "monthly" | "yearly") => { setBusy(plan); try { const result = await fetchJson<{ transactionId: string; checkoutUrl: string | null; environment: "sandbox" | "production"; clientToken: string | null }>("/api/supabase-sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "membership-checkout", plan }), label: "创建 Paddle 交易" }); if (!result.clientToken) throw new Error("Paddle 客户端 Token 尚未配置。 "); const paddle = await loadPaddle(); if (initializedPaddleToken && initializedPaddleToken !== result.clientToken) throw new Error("Paddle 环境已经改变，请重启应用后重试。 "); if (!initializedPaddleToken) { if (result.environment === "sandbox") paddle.Environment.set("sandbox"); paddle.Initialize({ token: result.clientToken }); initializedPaddleToken = result.clientToken; } paddle.Checkout.open({ transactionId: result.transactionId, settings: { displayMode: "overlay", theme: "light", locale: "zh" } }); setNotice("支付完成后将由 Paddle 回调自动开通，请勿以收银台前端提示作为到账依据。 "); if (pollRef.current) window.clearInterval(pollRef.current); pollRef.current = window.setInterval(() => void readMembership().catch(() => {}), 3_000); window.setTimeout(() => { if (pollRef.current) { window.clearInterval(pollRef.current); pollRef.current = null; } }, 5 * 60_000); } catch (error) { setNotice(error instanceof Error ? error.message : "无法打开收银台。 "); } finally { setBusy(""); } };
+  const syncNow = async (readOnly = false) => { setBusy("sync"); try { const data = await fetchJson<{ result: { summary: string } }>("/api/supabase-sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(readOnly ? { action: "pull" } : { action: "sync", choice: "merge" }), timeoutMs: 60_000, label: readOnly ? "只读拉取云端数据" : "会员云同步" }); setNotice(data.result.summary); await readMembership(); } catch (error) { setNotice(error instanceof Error ? error.message : "云同步失败。 "); } finally { setBusy(""); } };
+
+  const membership = overview?.membership;
+  const statusLabel = membership?.state === "trial" ? "7 天试用中" : membership?.state === "active" ? "会员有效" : membership?.state === "grace" ? "只读宽限期" : membership?.state === "expired" ? "会员已到期" : "免费版";
+  return <section className="account-data-portability" aria-label="数据迁移与会员云同步">
+    <div className="portability-intro"><div><p className="eyebrow"><ShieldCheck size={15}/> 两条清晰的数据通道</p><h2>带走数据，或让账号替你同步。</h2><p>自建知识库与学习记录受保护地迁移；社区付费内容始终留在在线授权边界内。</p></div><div className="portability-seal"><LockKeyhole size={24}/><span>APP-ONLY</span><small>认证加密容器</small></div></div>
+    <div className="portability-grid">
+      <Panel className="encrypted-transfer-card"><div className="portability-card-icon"><KeyRound size={22}/></div><p className="eyebrow">免费 · 完全离线</p><h3>加密迁移文件</h3><p>导出为专用 <code>.studydesk</code> 文件。普通解压和文本工具无法读取，文件被修改后会立即失效。</p><div className="portability-steps"><span><b>01</b>导出密文</span><span><b>02</b>复制到新电脑</span><span><b>03</b>在桌面端导入</span></div>{desktop ? <div className="form-actions"><Button variant="secondary" disabled={Boolean(busy)} onClick={() => void exportEncrypted()}><Download size={16}/>{busy === "export" ? "正在加密…" : "导出加密文件"}</Button><Button variant="outline" disabled={Boolean(busy)} onClick={() => void chooseImport()}><Upload size={16}/>{busy === "import" ? "正在验证…" : "选择迁移文件"}</Button><Button variant="ghost" disabled={Boolean(busy)} onClick={() => void showRecoveryPoints()}>查看本机恢复点</Button></div> : <p className="portability-warning">加密迁移仅在桌面应用中提供。</p>}{recoveryStatus && <p className="recovery-summary">本机已有 {recoveryStatus.count} 份加密恢复点 · {formatBytes(recoveryStatus.totalBytes)}{recoveryStatus.lastBackupAt ? ` · 最近 ${dateLabel(recoveryStatus.lastBackupAt)}` : ""}</p>}{recoveryStatus?.pausedReason && <p className="portability-warning">{recoveryStatus.pausedReason}</p>}{preview && <div className="encrypted-preview"><strong>文件验证通过{preview.legacy ? " · 旧版格式" : ""}</strong><span>{Object.values(preview.counts).reduce((sum, count) => sum + count, 0)} 条数据 · {preview.cardConflicts} 张卡片重合</span><div className="form-actions"><Button disabled={Boolean(busy)} onClick={() => void restore("merge")}>合并恢复</Button><Button variant="warning" disabled={Boolean(busy)} onClick={() => void restore("replace")}>安全备份后替换</Button></div></div>}</Panel>
+      <Panel className="membership-sync-card"><div className="membership-card-top"><div className="portability-card-icon"><Cloud size={22}/></div><span className={`membership-pill ${membership?.state ?? "free"}`}>{statusLabel}</span></div><p className="eyebrow">会员 · 账号服务</p><h3>云端自动同步</h3><p>同一账号在多台电脑同步自建知识库、学习进度、日志与计划，服务端始终重新校验会员状态。</p>{!signedIn ? <div className="membership-login"><label className="field">登录邮箱<input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" /></label><Button disabled={!email || Boolean(busy)} onClick={() => void requestLogin()}><Mail size={16}/>发送登录链接</Button></div> : <><div className="membership-meter"><div><span>云端空间</span><strong>{formatBytes(membership?.usedBytes ?? 0)} / {formatBytes(membership?.quotaBytes ?? 524_288_000)}</strong></div><progress max={membership?.quotaBytes ?? 524_288_000} value={membership?.usedBytes ?? 0}/></div>{membership?.activeUntil && <p className="membership-date"><Crown size={15}/>有效至 {dateLabel(membership.activeUntil)}</p>}{membership?.state === "grace" && <p className="membership-grace">当前仅可下载；云端数据将在 {dateLabel(membership.cloudDeleteAt)} 后清理。</p>}<div className="membership-actions">{membership?.trialAvailable && <Button disabled={Boolean(busy)} onClick={() => void startTrial()}><Sparkles size={16}/>{busy === "trial" ? "正在开通…" : "开始 7 天试用"}</Button>}<Button variant="secondary" disabled={Boolean(busy)} onClick={() => void checkout("monthly")}>月卡 ¥15</Button><Button variant="secondary" disabled={Boolean(busy)} onClick={() => void checkout("yearly")}>年卡 ¥128</Button>{membership?.canWriteCloud && <Button variant="outline" disabled={Boolean(busy)} onClick={() => void syncNow()}><RefreshCw size={16}/>立即同步</Button>}{membership?.state === "grace" && <Button variant="outline" disabled={Boolean(busy)} onClick={() => void syncNow(true)}><Download size={16}/>只读拉取</Button>}</div></>}</Panel>
+    </div>{notice && <p className="portability-notice" role="status">{notice}</p>}
+  </section>;
+}

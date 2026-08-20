@@ -27,9 +27,11 @@ contextBridge.exposeInMainWorld("mockInterviewDesktop", {
   network: {
     diagnostics: () => ipcRenderer.invoke("network:diagnostics"),
   },
-  cloudSync: {
-    credentialStatus: () => ipcRenderer.invoke("cloud-sync:credential-status"),
-    saveCredential: (password) => ipcRenderer.invoke("cloud-sync:save-credential", password),
+  backup: {
+    exportEncrypted: () => ipcRenderer.invoke("backup:export"),
+    chooseImport: () => ipcRenderer.invoke("backup:choose-import"),
+    restore: (mode) => ipcRenderer.invoke("backup:restore", mode),
+    showRecoveryPoints: () => ipcRenderer.invoke("backup:show-recovery-points"),
   },
   supabaseSync: {
     sessionStatus: () => ipcRenderer.invoke("supabase-sync:session-status"),

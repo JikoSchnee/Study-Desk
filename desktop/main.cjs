@@ -1,6 +1,8 @@
-const { app, BrowserWindow, ipcMain, net: electronNet, powerMonitor, session, utilityProcess, safeStorage } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, net: electronNet, powerMonitor, session, shell, utilityProcess, safeStorage } = require("electron");
 const { autoUpdater } = require("electron-updater");
-const { existsSync, readFileSync, writeFileSync, unlinkSync } = require("node:fs");
+const { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } = require("node:fs");
+const { randomBytes } = require("node:crypto");
+const transferContainer = require("./backup-container.cjs");
 const http = require("node:http");
 const net = require("node:net");
 const path = require("node:path");
@@ -10,7 +12,9 @@ let serverProcess;
 let serverPort;
 let isQuitting = false;
 let isRestartingServer = false;
-let pendingMagicLink = null;
+let pendingProtocolUrl = null;
+let pendingBackupImport = null;
+const localIpcToken = process.env.STUDY_DESK_LOCAL_IPC_TOKEN || randomBytes(32).toString("base64url");
 const releasesUrl = "https://github.com/JikoSchnee/Study-Desk/releases";
 const networkChecks = [
   { id: "network", label: "基础网络", url: "https://www.baidu.com/" },
@@ -54,7 +58,6 @@ async function checkForDesktopUpdate() {
 }
 
 function userHome() { return path.join(app.getPath("userData"), "runtime"); }
-function syncCredentialPath() { return path.join(app.getPath("userData"), "webdav-sync-credential.bin"); }
 function supabaseSessionPath() { return path.join(app.getPath("userData"), "supabase-sync-session.bin"); }
 function secureValue(file) {
   try { return existsSync(file) && safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(readFileSync(file)) : ""; } catch { return ""; }
@@ -63,16 +66,6 @@ function saveSecureValue(file, value, label) {
   if (!safeStorage.isEncryptionAvailable()) throw new Error(`系统安全存储不可用，无法保存${label}。`);
   if (!value) { if (existsSync(file)) unlinkSync(file); return false; }
   writeFileSync(file, safeStorage.encryptString(value), { mode: 0o600 }); return true;
-}
-function cloudSyncPassword() {
-  try {
-    const file = syncCredentialPath();
-    if (!existsSync(file) || !safeStorage.isEncryptionAvailable()) return "";
-    return safeStorage.decryptString(readFileSync(file));
-  } catch { return ""; }
-}
-function saveCloudSyncPassword(value) {
-  return saveSecureValue(syncCredentialPath(), value, " WebDAV 密码");
 }
 function supabaseSession() { return secureValue(supabaseSessionPath()); }
 function emailFromAccessToken(token) { try { return JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString("utf8")).email ?? null; } catch { return null; } }
@@ -95,6 +88,22 @@ async function acceptSupabaseMagicLink(value) {
     if (serverProcess) { isRestartingServer = true; await new Promise((resolve) => serverProcess.once("exit", resolve) && serverProcess.kill()); isRestartingServer = false; await startServer(serverPort); }
     if (mainWindow && !mainWindow.isDestroyed()) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); mainWindow.webContents.send("supabase-sync:magic-link", { ok: true, message: "Magic Link 登录成功。" }); }
   } catch (error) { mainWindow?.webContents.send("supabase-sync:magic-link", { ok: false, message: error instanceof Error ? error.message : "Magic Link 登录失败。" }); }
+}
+async function acceptStudyDeskLink(value) {
+  let callback;
+  try { callback = new URL(value); } catch { return; }
+  if (callback.protocol !== "study-desk:") return;
+  if (callback.hostname === "auth" && callback.pathname === "/callback") {
+    await acceptSupabaseMagicLink(value);
+    return;
+  }
+  const practice = callback.hostname === "community" ? callback.pathname.match(/^\/practice\/([a-z0-9-]+)$/i) : null;
+  if (!practice || !mainWindow || mainWindow.isDestroyed() || !serverPort) return;
+  const target = `http://127.0.0.1:${serverPort}/community/practice/${encodeURIComponent(practice[1])}`;
+  await mainWindow.loadURL(target);
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
 }
 function registerDeepLinkProtocol() {
   // In development Electron is launched through its binary plus this script,
@@ -216,7 +225,7 @@ async function startServer(port = null) {
   const networkHookPath = path.join(__dirname, "network-fetch.cjs");
   if (!existsSync(networkHookPath)) throw new Error("未找到桌面网络组件。请重新安装或重新打包应用。");
   serverProcess = utilityProcess.fork(serverPath, [], {
-    env: { ...process.env, PORT: String(serverPort), HOSTNAME: "127.0.0.1", MOCK_INTERVIEW_HOME: userHome(), MOCK_INTERVIEW_SYNC_PASSWORD: cloudSyncPassword(), MOCK_INTERVIEW_SUPABASE_SESSION: supabaseSession(), NODE_ENV: "production" },
+    env: { ...process.env, ...transferContainer.keyRing().environment, STUDY_DESK_LOCAL_IPC_TOKEN: localIpcToken, PORT: String(serverPort), HOSTNAME: "127.0.0.1", MOCK_INTERVIEW_HOME: userHome(), MOCK_INTERVIEW_SUPABASE_SESSION: supabaseSession(), NODE_ENV: "production" },
     execArgv: ["--require", networkHookPath],
     session: session.defaultSession,
     stdio: ["ignore", "ignore", "pipe"],
@@ -242,10 +251,10 @@ async function startServer(port = null) {
     void restartServer();
   });
   await waitForServer(serverPort);
-  // Ask the local service to install the user-selected cloud-sync schedule as
+  // Ask the local service to install the account cloud-sync schedule as
   // soon as the desktop application launches. Failure is non-fatal and will be
   // surfaced in the Settings page on the next manual check.
-  const syncRequest = http.request(`http://127.0.0.1:${serverPort}/api/cloud-sync`, { method: "POST", headers: { "Content-Type": "application/json", "Content-Length": 21 } }, (response) => response.resume());
+  const syncRequest = http.request(`http://127.0.0.1:${serverPort}/api/supabase-sync`, { method: "POST", headers: { "Content-Type": "application/json", "Content-Length": 21 } }, (response) => response.resume());
   syncRequest.write('{"action":"schedule"}');
   syncRequest.end();
   syncRequest.once("error", () => {});
@@ -297,24 +306,53 @@ function createWindow() {
   mainWindow.loadURL(`http://127.0.0.1:${serverPort}`);
 }
 
+async function localBackupApi(pathname, init = {}) {
+  if (!serverPort) throw new Error("本地数据服务尚未启动。 ");
+  const response = await electronNet.fetch(`http://127.0.0.1:${serverPort}${pathname}`, { ...init, headers: { "X-Study-Desk-IPC": localIpcToken, ...(init.body ? { "Content-Type": "application/json" } : {}), ...(init.headers || {}) } });
+  const body = await response.text();
+  let data; try { data = JSON.parse(body); } catch { throw new Error(`本地数据服务返回无效响应（HTTP ${response.status}）。`); }
+  if (!response.ok) throw new Error(data.error || `本地数据服务请求失败（HTTP ${response.status}）。`);
+  return data;
+}
+
 ipcMain.handle("window:minimize", () => mainWindow?.minimize());
 ipcMain.handle("window:toggle-maximize", () => { if (mainWindow?.isMaximized()) mainWindow.unmaximize(); else mainWindow?.maximize(); });
 ipcMain.handle("window:close", () => mainWindow?.close());
 ipcMain.handle("window:is-maximized", () => mainWindow?.isMaximized() ?? false);
 ipcMain.handle("network:diagnostics", () => desktopNetworkDiagnostics());
-ipcMain.handle("cloud-sync:credential-status", () => ({ configured: Boolean(cloudSyncPassword()), secureStorageAvailable: safeStorage.isEncryptionAvailable() }));
-ipcMain.handle("cloud-sync:save-credential", async (_event, password) => {
-  const configured = saveCloudSyncPassword(typeof password === "string" ? password : "");
-  // The Next service is a separate process. Restarting it is the only point at
-  // which the decrypted password crosses into its private process environment.
-  if (serverProcess) {
-    isRestartingServer = true;
-    await new Promise((resolve) => serverProcess.once("exit", resolve) && serverProcess.kill());
-    isRestartingServer = false;
-    await startServer(serverPort);
-    mainWindow?.webContents.send("desktop:server-recovered");
-  }
-  return { configured, secureStorageAvailable: safeStorage.isEncryptionAvailable() };
+ipcMain.handle("backup:export", async () => {
+  const backup = await localBackupApi("/api/backup");
+  const result = await dialog.showSaveDialog(mainWindow, { title: "导出加密迁移文件", defaultPath: `study-desk-${new Date().toISOString().slice(0, 10)}.studydesk`, filters: [{ name: "Study Desk 加密迁移文件", extensions: ["studydesk"] }] });
+  if (result.canceled || !result.filePath) return { canceled: true };
+  writeFileSync(result.filePath, transferContainer.encrypt(backup), { mode: 0o600 });
+  return { canceled: false, fileName: path.basename(result.filePath) };
+});
+ipcMain.handle("backup:choose-import", async () => {
+  const result = await dialog.showOpenDialog(mainWindow, { title: "导入 Study Desk 迁移文件", properties: ["openFile"], filters: [{ name: "Study Desk 迁移文件", extensions: ["studydesk", "json"] }] });
+  if (result.canceled || !result.filePaths[0]) return { canceled: true };
+  const raw = readFileSync(result.filePaths[0]);
+  const legacyText = raw.toString("utf8").replace(/^\uFEFF/, "").trimStart();
+  const legacy = legacyText.startsWith("{");
+  let backup;
+  if (legacy) { try { backup = JSON.parse(legacyText); } catch { throw new Error("旧版 JSON 备份无效。 "); } }
+  else backup = transferContainer.decrypt(raw);
+  const preview = await localBackupApi("/api/backup/import", { method: "POST", body: JSON.stringify({ action: "preview", backup }) });
+  pendingBackupImport = backup;
+  return { canceled: false, legacy, preview: preview.preview };
+});
+ipcMain.handle("backup:restore", async (_event, mode) => {
+  if (!pendingBackupImport) throw new Error("请先选择并验证迁移文件。 ");
+  if (mode !== "merge" && mode !== "replace") throw new Error("恢复模式无效。 ");
+  const result = await localBackupApi("/api/backup/import", { method: "POST", body: JSON.stringify({ action: "restore", backup: pendingBackupImport, mode }) });
+  pendingBackupImport = null;
+  return result;
+});
+ipcMain.handle("backup:show-recovery-points", async () => {
+  const directory = path.join(userHome(), "data", "backups");
+  mkdirSync(directory, { recursive: true });
+  const error = await shell.openPath(directory);
+  if (error) throw new Error(`无法打开加密恢复点目录：${error}`);
+  return { directory };
 });
 ipcMain.handle("supabase-sync:session-status", () => supabaseSessionStatus());
 ipcMain.handle("supabase-sync:save-session", async (_event, value) => {
@@ -366,10 +404,10 @@ if (!gotSingleInstanceLock) app.quit();
 
 // macOS delivers a custom-protocol launch through this event. Register it
 // before Electron becomes ready so links opened during startup are not lost.
-app.on("open-url", (event, url) => { event.preventDefault(); if (app.isReady()) void acceptSupabaseMagicLink(url); else pendingMagicLink = url; });
+app.on("open-url", (event, url) => { event.preventDefault(); if (app.isReady()) void acceptStudyDeskLink(url); else pendingProtocolUrl = url; });
 
 app.on("second-instance", (_event, commandLine) => {
-  const callback = commandLine.find((item) => item.startsWith("study-desk://")); if (callback) void acceptSupabaseMagicLink(callback);
+  const callback = commandLine.find((item) => item.startsWith("study-desk://")); if (callback) void acceptStudyDeskLink(callback);
   if (!mainWindow) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.focus();
@@ -379,7 +417,7 @@ app.whenReady().then(async () => {
   if (!gotSingleInstanceLock) return;
   configureAutoUpdater();
   registerDeepLinkProtocol();
-  try { await startServer(); createWindow(); if (pendingMagicLink) { const callback = pendingMagicLink; pendingMagicLink = null; void acceptSupabaseMagicLink(callback); } if (updaterSupported) void checkForDesktopUpdate(); }
+  try { await startServer(); createWindow(); if (pendingProtocolUrl) { const callback = pendingProtocolUrl; pendingProtocolUrl = null; void acceptStudyDeskLink(callback); } if (updaterSupported) void checkForDesktopUpdate(); }
   catch (error) { console.error(error); app.quit(); }
 });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });

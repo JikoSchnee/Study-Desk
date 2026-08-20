@@ -43,9 +43,11 @@ declare global {
       network: {
         diagnostics(): Promise<DesktopNetworkDiagnostics>;
       };
-      cloudSync: {
-        credentialStatus(): Promise<{ configured: boolean; secureStorageAvailable: boolean }>;
-        saveCredential(password: string): Promise<{ configured: boolean; secureStorageAvailable: boolean }>;
+      backup: {
+        exportEncrypted(): Promise<{ canceled: boolean; fileName?: string }>;
+        chooseImport(): Promise<{ canceled: boolean; legacy?: boolean; preview?: { counts: Record<string, number>; cardConflicts: number } }>;
+        restore(mode: "merge" | "replace"): Promise<{ ok: boolean; recoveryCreated: boolean; backupWarning: string | null }>;
+        showRecoveryPoints(): Promise<{ directory: string }>;
       };
       supabaseSync: {
         sessionStatus(): Promise<{ configured: boolean; signedIn: boolean; email: string | null; secureStorageAvailable: boolean }>;

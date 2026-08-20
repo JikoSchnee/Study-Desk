@@ -1,23 +1,22 @@
 import "server-only";
 import { sqlite } from "@/lib/db";
 import { randomUUID } from "node:crypto";
+import { backupTableNames, isLocalOnlyBackupSetting } from "@/lib/backup-policy";
 
 export const BACKUP_VERSION = 8;
-const tables = ["knowledge_bases", "study_plans", "study_plan_knowledge_bases", "cards", "card_relations", "review_state", "review_logs", "initial_study_logs", "daily_plans", "daily_tasks", "daily_reports", "daily_report_items", "interview_sessions", "interview_turns", "knowledge_maintenance_proposals", "knowledge_sync_records", "practice_focus", "settings", "tags"] as const;
+const tables = backupTableNames;
 type BackupTable = (typeof tables)[number];
 export type AppBackup = { version: number; exportedAt: string; tables: Record<BackupTable, Record<string, unknown>[]> };
-
-const localOnlySettingPrefixes = ["cloudSync", "supabaseSyncNextSyncAt", "autoBackupLast", "autoBackupPausedReason"];
 
 function backupRows(table: BackupTable) {
   const rows = sqlite.prepare(`SELECT * FROM ${table}`).all() as Record<string, unknown>[];
   // Device-specific destinations, scheduling markers, and failure messages must
   // never follow a backup to another device.
-  return table === "settings" ? rows.filter((row) => !localOnlySettingPrefixes.some((prefix) => String(row.key).startsWith(prefix))) : rows;
+  return table === "settings" ? rows.filter((row) => !isLocalOnlyBackupSetting(row.key)) : rows;
 }
 
 function localOnlySettings() {
-  return (sqlite.prepare("SELECT key, value FROM settings").all() as Record<string, unknown>[]).filter((row) => localOnlySettingPrefixes.some((prefix) => String(row.key).startsWith(prefix)));
+  return (sqlite.prepare("SELECT key, value FROM settings").all() as Record<string, unknown>[]).filter((row) => isLocalOnlyBackupSetting(row.key));
 }
 
 export function createBackup(): AppBackup {

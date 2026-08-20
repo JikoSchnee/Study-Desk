@@ -1,9 +1,10 @@
 import "server-only";
-import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createBackup } from "@/lib/backup";
 import { sqlite } from "@/lib/db";
 import { getAppSettings } from "@/lib/settings";
+import { decryptStudyDeskContainer, encryptStudyDeskContainer } from "@/lib/backup-container";
 
 const backupDirectory = join(process.env.MOCK_INTERVIEW_HOME || process.cwd(), "data", "backups");
 const bytesPerMb = 1024 * 1024;
@@ -16,10 +17,22 @@ function listFiles(): BackupFile[] {
   try {
     if (!process.env.MOCK_INTERVIEW_HOME) return [];
     mkdirSync(backupDirectory, { recursive: true });
-    return readdirSync(backupDirectory).filter((name) => name.startsWith("auto-backup-") && name.endsWith(".json")).map((name) => {
+    migrateLegacyBackups();
+    return readdirSync(backupDirectory).filter((name) => name.startsWith("auto-backup-") && name.endsWith(".studydesk")).map((name) => {
       const path = join(backupDirectory, name); const stat = statSync(path); return { name, path, size: stat.size, modifiedAt: stat.mtimeMs };
     }).sort((left, right) => left.modifiedAt - right.modifiedAt);
   } catch { return []; }
+}
+let migratedLegacyBackups = false;
+function migrateLegacyBackups() {
+  if (migratedLegacyBackups || !process.env.STUDY_DESK_TRANSFER_KEY_CURRENT) return;
+  migratedLegacyBackups = true;
+  for (const name of readdirSync(backupDirectory).filter((item) => item.startsWith("auto-backup-") && item.endsWith(".json"))) {
+    const source = join(backupDirectory, name); const target = join(backupDirectory, name.replace(/\.json$/, ".studydesk")); const temporary = `${target}.tmp`;
+    try {
+      const backup = JSON.parse(readFileSync(source, "utf8")); const encrypted = encryptStudyDeskContainer(backup); writeFileSync(temporary, encrypted, { mode: 0o600 }); decryptStudyDeskContainer(readFileSync(temporary)); renameSync(temporary, target); unlinkSync(source);
+    } catch { try { if (statSync(temporary).isFile()) unlinkSync(temporary); } catch {} }
+  }
 }
 function totalBytes(files = listFiles()) { return files.reduce((total, file) => total + file.size, 0); }
 function localDay(now: Date) { return `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`; }
@@ -36,19 +49,19 @@ export function getAutoBackupStatus(): AutoBackupStatus {
   return { directory: backupDirectory, totalBytes: totalBytes(files), count: files.length, lastBackupAt: setting("autoBackupLastBackupAt") ?? null, pausedReason: setting("autoBackupPausedReason") ?? null, minimumStorageMb: getAutoBackupMinimumStorageMb() };
 }
 
-export function triggerAutoBackup(now = new Date()) {
+export function triggerAutoBackup(now = new Date(), force = false) {
   // The desktop main process supplies MOCK_INTERVIEW_HOME. Browser deployments
   // must not silently start writing server-side backup files.
   if (!process.env.MOCK_INTERVIEW_HOME) return { state: "unavailable" as const };
   const config = getAppSettings();
-  if (!config.autoBackupEnabled) return { state: "disabled" as const };
-  if (setting("autoBackupPausedReason")) return { state: "paused" as const };
+  if (!force && !config.autoBackupEnabled) return { state: "disabled" as const };
+  if (!force && setting("autoBackupPausedReason")) return { state: "paused" as const };
   const periodKey = config.autoBackupMode === "daily" ? localDay(now) : config.autoBackupMode === "weekly" ? localWeek(now) : null;
-  if (periodKey && setting(`autoBackupLast${config.autoBackupMode === "daily" ? "Day" : "Week"}`) === periodKey) return { state: "skipped" as const };
+  if (!force && periodKey && setting(`autoBackupLast${config.autoBackupMode === "daily" ? "Day" : "Week"}`) === periodKey) return { state: "skipped" as const };
   try {
-    const payload = JSON.stringify(createBackup());
-    const newBackupBytes = Buffer.byteLength(payload);
-    const limit = config.autoBackupMaxStorageMb * bytesPerMb;
+    const payload = encryptStudyDeskContainer(createBackup());
+    const newBackupBytes = payload.byteLength;
+    const limit = force ? Number.MAX_SAFE_INTEGER : config.autoBackupMaxStorageMb * bytesPerMb;
     let files = listFiles();
     if (totalBytes(files) + newBackupBytes > limit) {
       if (config.autoBackupOverflowPolicy === "pause") {
@@ -61,7 +74,8 @@ export function triggerAutoBackup(now = new Date()) {
     if (newBackupBytes > limit) throw new Error("当前备份体积超过设置的自动备份空间上限。");
     mkdirSync(backupDirectory, { recursive: true });
     const stamp = now.toISOString().replace(/[:.]/g, "-");
-    writeFileSync(join(backupDirectory, `auto-backup-${stamp}.json`), payload, "utf8");
+    const target = join(backupDirectory, `auto-backup-${stamp}.studydesk`); const temporary = `${target}.tmp`;
+    writeFileSync(temporary, payload, { mode: 0o600 }); decryptStudyDeskContainer(readFileSync(temporary)); renameSync(temporary, target);
     const completedAt = now.toISOString();
     saveSetting("autoBackupLastBackupAt", completedAt);
     if (periodKey) saveSetting(`autoBackupLast${config.autoBackupMode === "daily" ? "Day" : "Week"}`, periodKey);
