@@ -186,7 +186,7 @@ returns boolean language sql stable security definer set search_path = public as
 $$;
 
 create or replace function public.get_community_card(target_id uuid, target_position integer)
-returns table (id uuid, position integer, question text, answer_points jsonb, note text, version integer)
+returns table (id uuid, "position" integer, question text, answer_points jsonb, note text, version integer)
 language plpgsql volatile security definer set search_path = public as $$
 declare selected_card public.community_cards%rowtype;
 begin
