@@ -21,7 +21,7 @@ Magic Link 邮件模板必须保留 `{{ .ConfirmationURL }}`。
 
 ## 2. 创建 Vercel 项目
 
-将此仓库导入 Vercel，Framework Preset 选择 Next.js，Root Directory 保持仓库根目录。仓库中的 `vercel.json` 会执行 `npm run build:vercel`，只构建 `vercel-service` 的单个云函数；不要把 Build Command 手动覆盖回 `npm run build`，否则 Electron 的本机 API 路由也会被部署，并超过 Hobby 套餐的函数数量限制。
+将此仓库导入 Vercel，Framework Preset 选择 Next.js，Root Directory 保持仓库根目录。仓库中的 `vercel.json` 会执行 `npm run build:vercel`，只构建 `apps/service` 的首页和单个 catch-all 云函数；不要把 Build Command 手动覆盖回 `npm run build`，后者是桌面端构建入口。
 
 为 Production、Preview、Development 配置：
 
@@ -80,7 +80,7 @@ STUDY_DESK_TRANSFER_KEY_PREVIOUS={}
 - 确认试用只能领取一次；有效期内充值从当前到期时间累加；过期充值从支付完成时间计算。
 - 确认到期账号 30 天内只读，30 天后 Cron 删除文档和历史；重新试用或充值会恢复写入。
 - 确认单快照超过 4 MB、总用量超过 500 MB、版本号冲突均被服务端拒绝。
-- 运行 `npm test`、`npm run lint`、`npm run build` 和 `npm run desktop:bundle`。
+- 运行 `npm run check:boundaries`、`npm test`、`npm run lint`、`npm run build:service` 和 `npm run desktop:build`。
 
 ## 6. 安全边界
 

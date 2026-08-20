@@ -8,7 +8,7 @@
 
 ## 2. 设计原则
 
-1. **领域函数是唯一事实来源**：MCP handler 调用 `src/lib` 中的业务函数，不直接拼 SQL，也不通过本机 HTTP 绕行 Next.js route。
+1. **领域函数是唯一事实来源**：MCP handler 调用 `apps/desktop/src/lib` 中的业务函数，不直接拼 SQL，也不通过本机 HTTP 绕行 Next.js route。
 2. **读写分级**：查询工具可直接调用；创建和修改默认写入草稿；影响排程或删除数据的动作必须显式确认。
 3. **一次调用只做一件事**：工具保持小而稳定，复杂工作流由 Agent 编排。
 4. **返回机器可读结果**：所有工具都提供 `structuredContent`，文本内容只用于给人类快速阅读。
@@ -32,7 +32,7 @@ flowchart LR
   I -.-> L["Configured LLM / Embedding"]
 ```
 
-建议新增独立入口 `src/mcp/index.ts`，同时抽出 `src/mcp/domain.ts` 作为适配层。Next.js API routes 与 MCP handlers 共同调用相同的 `src/lib` 领域函数。
+入口位于 `apps/desktop/src/mcp/index.ts`，`apps/desktop/src/mcp/domain.ts` 作为适配层。桌面 Next.js API routes 与 MCP handlers 共同调用相同的 `apps/desktop/src/lib` 领域函数。
 
 ## 4. MCP 能力
 
@@ -213,15 +213,10 @@ sequenceDiagram
 ## 8. 项目落地结构
 
 ```text
-src/
+apps/desktop/src/
   mcp/
     index.ts              # server 与 stdio transport
-    register-tools.ts     # 工具注册
-    register-resources.ts # 资源注册
-    schemas.ts            # MCP 输入/输出 schema
-    errors.ts             # 稳定错误映射
-    domain.ts             # 对 src/lib 的薄适配层
-    audit.ts              # stderr + 可选本地审计
+    domain.ts             # 对桌面 lib 的薄适配层
   lib/
     ...                   # 现有领域逻辑
 ```
@@ -231,7 +226,7 @@ src/
 ```json
 {
   "scripts": {
-    "mcp:dev": "tsx src/mcp/index.ts",
+    "mcp:dev": "tsx apps/desktop/src/mcp/index.ts",
     "mcp:inspect": "npx @modelcontextprotocol/inspector npm run mcp:dev"
   }
 }

@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "plugins": [{ "name": "next" }],
+    "paths": {
+      "@service/*": ["./server/*"],
+      "@shared/*": ["../../packages/shared/src/*"]
+    },
+    "incremental": true,
+    "tsBuildInfoFile": ".next/cache/tsconfig.tsbuildinfo"
+  },
+  "include": ["next-env.d.ts", "app/**/*.ts", "app/**/*.tsx", "server/**/*.ts", "../../packages/shared/src/**/*.ts", ".next/types/**/*.ts"],
+  "exclude": ["../../node_modules"]
+}

@@ -5,28 +5,33 @@
   "author": "JikoSchnee",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "build:vercel": "next build vercel-service",
-    "desktop:prepare": "node desktop/prepare-next.cjs",
-    "desktop:rebuild": "node desktop/rebuild-native.cjs",
-    "desktop:sync-native": "node desktop/sync-native.cjs",
-    "desktop:verify-native": "node desktop/verify-native.cjs",
-    "desktop:smoke": "node desktop/smoke-next.cjs",
-    "desktop:bundle": "node desktop/bundle.cjs",
-    "desktop:check-transfer-key": "node desktop/check-transfer-key.cjs",
-    "desktop:build": "npm run build && npm run desktop:prepare && npm run desktop:rebuild && npm run desktop:sync-native && npm rebuild better-sqlite3 && npm run desktop:verify-native && npm run desktop:smoke && npm run desktop:bundle",
+    "dev": "next dev apps/desktop",
+    "dev:service": "next dev apps/service",
+    "build": "npm run build:desktop",
+    "build:desktop": "npm run check:boundaries && next build apps/desktop",
+    "build:service": "npm run check:boundaries && next build apps/service",
+    "build:vercel": "npm run build:service",
+    "desktop:prepare": "node apps/desktop/electron/prepare-next.cjs",
+    "desktop:rebuild": "node apps/desktop/electron/rebuild-native.cjs",
+    "desktop:sync-native": "node apps/desktop/electron/sync-native.cjs",
+    "desktop:verify-native": "node apps/desktop/electron/verify-native.cjs",
+    "desktop:smoke": "node apps/desktop/electron/smoke-next.cjs",
+    "desktop:bundle": "node apps/desktop/electron/bundle.cjs",
+    "desktop:check-transfer-key": "node apps/desktop/electron/check-transfer-key.cjs",
+    "desktop:build": "npm run build:desktop && npm run desktop:prepare && npm run desktop:rebuild && npm run desktop:sync-native && npm rebuild better-sqlite3 && npm run desktop:verify-native && npm run desktop:smoke && npm run desktop:bundle",
     "desktop:dev": "npm run desktop:dev:fast",
-    "desktop:dev:fast": "node desktop/bundle.cjs && node desktop/dev-fast.cjs",
+    "desktop:dev:fast": "node apps/desktop/electron/bundle.cjs && node apps/desktop/electron/dev-fast.cjs",
     "desktop:dev:build": "npm run desktop:build && electron .",
     "desktop:dist": "npm run desktop:check-transfer-key && npm run desktop:build && electron-builder --publish never",
-    "start": "next start",
+    "start": "next start apps/desktop",
+    "start:service": "next start apps/service",
     "lint": "eslint .",
     "test": "vitest run",
+    "check:boundaries": "node scripts/check-app-boundaries.mjs",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "db:generate": "drizzle-kit generate",
-    "mcp:dev": "NODE_OPTIONS=--conditions=react-server tsx src/mcp/index.ts",
+    "mcp:dev": "NODE_OPTIONS=--conditions=react-server tsx apps/desktop/src/mcp/index.ts",
     "mcp:inspect": "npx @modelcontextprotocol/inspector npm run mcp:dev"
   },
   "dependencies": {
@@ -69,7 +74,7 @@
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   },
-  "main": "desktop/dist/main.cjs",
+  "main": "apps/desktop/electron/dist/main.cjs",
   "build": {
     "appId": "com.jikoschnee.mockinterview",
     "productName": "Study Desk",
@@ -87,13 +92,13 @@
       "output": "release"
     },
     "files": [
-      "desktop/dist/**/*",
+      "apps/desktop/electron/dist/**/*",
       "package.json",
       "!node_modules/**"
     ],
     "extraResources": [
       {
-        "from": ".next/standalone",
+        "from": "apps/desktop/.next/standalone",
         "to": "next",
         "filter": [
           "**/*",
@@ -101,19 +106,11 @@
         ]
       },
       {
-        "from": ".next/standalone/node_modules",
+        "from": "apps/desktop/.next/standalone/node_modules",
         "to": "next/node_modules",
         "filter": [
           "**/*"
         ]
-      },
-      {
-        "from": ".next/static",
-        "to": "next/.next/static"
-      },
-      {
-        "from": "public",
-        "to": "next/public"
       }
     ],
     "asarUnpack": [
@@ -144,7 +141,7 @@
     "dmg": {
       "title": "Study Desk ${version}"
     },
-    "afterPack": "desktop/after-pack.cjs",
+    "afterPack": "apps/desktop/electron/after-pack.cjs",
     "publish": [
       {
         "provider": "github",

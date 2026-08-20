@@ -12,15 +12,6 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "preserve",
-    "incremental": true,
-    "plugins": [{ "name": "next" }],
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["./apps/desktop/src/*"],
-      "@service/*": ["./apps/service/server/*"],
-      "@shared/*": ["./packages/shared/src/*"]
-    }
-  },
-  "include": ["apps/**/*.ts", "apps/**/*.tsx", "packages/**/*.ts"],
-  "exclude": ["node_modules"]
+    "incremental": true
+  }
 }

@@ -20,6 +20,7 @@ jobs:
       - run: npm ci
       - run: node -e "const version = require('./package.json').version; if ('v' + version !== process.env.GITHUB_REF_NAME) throw new Error('Tag must equal package.json version.');"
       - run: npm run lint
+      - run: npm run check:boundaries
       - run: npm test
 
   build-macos:

@@ -11,13 +11,13 @@ const config = [
       "**/.next/**",
       "node_modules/**",
       "release/**",
-      "desktop/dist/**",
+      "apps/desktop/electron/dist/**",
       "**/next-env.d.ts",
     ],
   },
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   {
-    files: ["desktop/**/*.cjs"],
+    files: ["apps/desktop/electron/**/*.cjs"],
     rules: { "@typescript-eslint/no-require-imports": "off" },
   },
 ];
