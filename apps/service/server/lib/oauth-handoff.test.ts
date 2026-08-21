@@ -35,8 +35,11 @@ describe("Google OAuth PKCE handoff", () => {
     expect(ciphertext).not.toContain("secret-token");
     expect(decryptAuthSecret(ciphertext)).toEqual({ access_token: "secret-token" });
 
-    const last = ciphertext.at(-1) === "a" ? "b" : "a";
-    expect(() => decryptAuthSecret(`${ciphertext.slice(0, -1)}${last}`)).toThrow();
+    const parts = ciphertext.split(".");
+    const encrypted = Buffer.from(parts[2], "base64url");
+    encrypted[0] ^= 1;
+    parts[2] = encrypted.toString("base64url");
+    expect(() => decryptAuthSecret(parts.join("."))).toThrow();
   });
 
   it("creates a PKCE authorization URL without exposing the verifier", async () => {

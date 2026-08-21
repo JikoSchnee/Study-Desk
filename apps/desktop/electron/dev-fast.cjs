@@ -1,4 +1,5 @@
 const { spawn } = require("node:child_process");
+const { randomBytes } = require("node:crypto");
 const http = require("node:http");
 const { join } = require("node:path");
 
@@ -8,6 +9,8 @@ const port = Number(process.env.STUDY_DESK_DEV_PORT ?? 3010);
 const node = process.execPath;
 const next = require.resolve("next/dist/bin/next");
 const electron = require("electron");
+const localIpcToken = process.env.STUDY_DESK_LOCAL_IPC_TOKEN || randomBytes(32).toString("base64url");
+const sharedEnvironment = { ...process.env, STUDY_DESK_LOCAL_IPC_TOKEN: localIpcToken };
 let nextProcess;
 let electronProcess;
 
@@ -30,9 +33,9 @@ function waitForServer() {
 function stop(child) { if (child && !child.killed) child.kill(); }
 
 async function main() {
-  nextProcess = spawn(node, [next, "dev", "--hostname", "127.0.0.1", "--port", String(port)], { cwd: desktopRoot, stdio: "inherit", env: { ...process.env, NODE_ENV: "development" } });
+  nextProcess = spawn(node, [next, "dev", "--hostname", "127.0.0.1", "--port", String(port)], { cwd: desktopRoot, stdio: "inherit", env: { ...sharedEnvironment, NODE_ENV: "development" } });
   await waitForServer();
-  electronProcess = spawn(electron, [workspaceRoot], { cwd: workspaceRoot, stdio: "inherit", env: { ...process.env, STUDY_DESK_DEV_SERVER: "1", STUDY_DESK_DEV_PORT: String(port), NODE_ENV: "development" } });
+  electronProcess = spawn(electron, [workspaceRoot], { cwd: workspaceRoot, stdio: "inherit", env: { ...sharedEnvironment, STUDY_DESK_DEV_SERVER: "1", STUDY_DESK_DEV_PORT: String(port), NODE_ENV: "development" } });
   electronProcess.once("exit", (code) => { stop(nextProcess); process.exit(code ?? 0); });
 }
 process.once("SIGINT", () => { stop(electronProcess); stop(nextProcess); });
