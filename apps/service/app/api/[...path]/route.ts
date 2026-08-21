@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { POST as sendMagicLink } from "@service/routes/service/auth/magic-link/route";
 import { POST as refreshSession } from "@service/routes/service/auth/refresh/route";
+import { GET as getAuthAccount } from "@service/routes/service/auth/account/route";
+import { DELETE as deleteAuthIdentity } from "@service/routes/service/auth/identities/[id]/route";
+import { POST as logout } from "@service/routes/service/auth/logout/route";
+import { GET as oauthCallback } from "@service/routes/service/auth/oauth/callback/route";
+import { POST as completeOAuth } from "@service/routes/service/auth/oauth/complete/route";
+import { POST as startOAuth } from "@service/routes/service/auth/oauth/start/route";
 import { GET as cleanCloud } from "@service/routes/service/maintenance/cloud-cleanup/route";
 import { GET as getMembership } from "@service/routes/service/membership/route";
 import { POST as startTrial } from "@service/routes/service/membership/trial/route";
@@ -32,6 +38,10 @@ export async function GET(request: Request, context: RouteContext) {
   const route = path.join("/");
 
   if (route === "service/membership") return getMembership(request);
+  if (route === "service/auth/account") return getAuthAccount(request);
+  if (path.length === 5 && path.slice(0, 4).join("/") === "service/auth/oauth/callback") {
+    return oauthCallback(request, { params: Promise.resolve({ flowId: path[4] }) });
+  }
   if (route === "service/sync") return readSync(request);
   if (route === "service/maintenance/cloud-cleanup") return cleanCloud(request);
   if (route === "community/catalog") return getCommunityCatalog();
@@ -45,6 +55,9 @@ export async function GET(request: Request, context: RouteContext) {
   if ([
     "service/auth/magic-link",
     "service/auth/refresh",
+    "service/auth/logout",
+    "service/auth/oauth/start",
+    "service/auth/oauth/complete",
     "service/membership/trial",
     "service/membership/checkout",
     "community/checkout",
@@ -60,6 +73,9 @@ export async function POST(request: Request, context: RouteContext) {
 
   if (route === "service/auth/magic-link") return sendMagicLink(request);
   if (route === "service/auth/refresh") return refreshSession(request);
+  if (route === "service/auth/logout") return logout(request);
+  if (route === "service/auth/oauth/start") return startOAuth(request);
+  if (route === "service/auth/oauth/complete") return completeOAuth(request);
   if (route === "service/membership/trial") return startTrial(request);
   if (route === "service/membership/checkout") return createCheckout(request);
   if (route === "service/sync") return writeSync(request);
@@ -67,6 +83,14 @@ export async function POST(request: Request, context: RouteContext) {
   if (route === "community/checkout") return createCommunityCheckout(request);
   if (route === "webhooks/paddle") return handlePaddleWebhook(request);
 
-  if (["service/membership", "community/catalog", "release/latest"].includes(route)) return methodNotAllowed(["GET"]);
+  if (["service/membership", "service/auth/account", "community/catalog", "release/latest"].includes(route)) return methodNotAllowed(["GET"]);
+  return notFound();
+}
+
+export async function DELETE(request: Request, context: RouteContext) {
+  const path = (await context.params).path;
+  if (path.length === 4 && path.slice(0, 3).join("/") === "service/auth/identities") {
+    return deleteAuthIdentity(request, { params: Promise.resolve({ id: path[3] }) });
+  }
   return notFound();
 }

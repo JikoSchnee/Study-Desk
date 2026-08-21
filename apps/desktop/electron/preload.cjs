@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld("mockInterviewDesktop", {
   supabaseSync: {
     sessionStatus: () => ipcRenderer.invoke("supabase-sync:session-status"),
     saveSession: (value) => ipcRenderer.invoke("supabase-sync:save-session", value),
+    openOAuth: (url) => ipcRenderer.invoke("supabase-sync:open-oauth", url),
     onMagicLink: (listener) => { const handler = (_event, result) => listener(result); ipcRenderer.on("supabase-sync:magic-link", handler); return () => ipcRenderer.removeListener("supabase-sync:magic-link", handler); },
     onSessionChange: (listener) => { const handler = (_event, result) => listener(result); ipcRenderer.on("supabase-sync:session-change", handler); return () => ipcRenderer.removeListener("supabase-sync:session-change", handler); },
   },

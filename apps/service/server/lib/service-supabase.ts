@@ -35,6 +35,8 @@ export function serviceError(error: unknown) {
   if (message.includes("MEMBERSHIP_READ_ONLY")) return { status: 403, message: "会员已到期，当前处于 30 天只读宽限期；续费后才能继续上传。" };
   if (message.includes("MEMBERSHIP_REQUIRED")) return { status: 402, message: "云同步需要有效试用或会员，请先开始 7 天试用或充值会员。" };
   if (message.includes("TRIAL_ALREADY_USED")) return { status: 409, message: "此账号已经领取过 7 天试用。" };
+  if (/identity_already_exists|already.*linked|belongs to another/i.test(message)) return { status: 409, message: "这个 Google 身份已经属于另一个账号，不支持合并不同账号。" };
+  if (/认证交接码无效|OAuth 流程已失效|已经完成/.test(message)) return { status: 400, message };
   if (message.includes("SYNC_VERSION_CONFLICT")) return { status: 409, message: "云端数据刚刚被另一台设备更新，请重新同步。" };
   if (message.includes("SYNC_QUOTA_EXCEEDED")) return { status: 413, message: "云同步空间已达到 500 MB 上限，请减少历史版本或数据体积。" };
   return { status: 500, message: message || "Study Desk 服务暂时不可用。" };

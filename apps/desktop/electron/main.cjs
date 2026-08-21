@@ -69,6 +69,7 @@ function saveSecureValue(file, value, label) {
 }
 function supabaseSession() { return secureValue(supabaseSessionPath()); }
 function emailFromAccessToken(token) { try { return JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString("utf8")).email ?? null; } catch { return null; } }
+function userIdFromAccessToken(token) { try { return JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString("utf8")).sub ?? null; } catch { return null; } }
 function validSupabaseSession(value) { return Boolean(value && typeof value.access_token === "string" && typeof value.refresh_token === "string"); }
 function supabaseSessionStatus() {
   const value = supabaseSession();
@@ -81,6 +82,22 @@ async function acceptSupabaseMagicLink(value) {
   try {
     const callback = new URL(value);
     if (callback.protocol !== "study-desk:" || callback.hostname !== "auth" || callback.pathname !== "/callback") return;
+    const callbackError = callback.searchParams.get("error_description");
+    if (callbackError) throw new Error(callbackError);
+    const handoff = callback.searchParams.get("handoff");
+    if (handoff) {
+      const previousValue = supabaseSession();
+      const previous = previousValue ? JSON.parse(previousValue) : null;
+      const result = await localBackupApi("/api/supabase-sync", { method: "POST", body: JSON.stringify({ action: "oauth-complete", handoffToken: handoff }) });
+      if (!validSupabaseSession(result.session)) throw new Error("Google 登录没有返回有效会话。 ");
+      const previousUserId = previous?.access_token ? userIdFromAccessToken(previous.access_token) : null;
+      const nextUserId = result.session.user?.id ?? userIdFromAccessToken(result.session.access_token);
+      if (result.intent === "link" && previousUserId && nextUserId !== previousUserId) throw new Error("Google 身份属于另一个账号，不支持合并不同账号。 ");
+      saveSecureValue(supabaseSessionPath(), JSON.stringify(result.session), " Supabase 会话");
+      if (serverProcess) { isRestartingServer = true; await new Promise((resolve) => serverProcess.once("exit", resolve) && serverProcess.kill()); isRestartingServer = false; await startServer(serverPort); }
+      if (mainWindow && !mainWindow.isDestroyed()) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); mainWindow.webContents.send("supabase-sync:magic-link", { ok: true, message: result.intent === "link" ? "Google 登录方式已关联到当前账号。" : "Google 登录成功。" }); }
+      return;
+    }
     const params = new URLSearchParams(callback.hash.slice(1));
     const access_token = params.get("access_token"); const refresh_token = params.get("refresh_token");
     if (!access_token || !refresh_token) throw new Error(params.get("error_description") ?? "Magic Link 未返回有效登录会话。");
@@ -320,6 +337,13 @@ ipcMain.handle("window:toggle-maximize", () => { if (mainWindow?.isMaximized()) 
 ipcMain.handle("window:close", () => mainWindow?.close());
 ipcMain.handle("window:is-maximized", () => mainWindow?.isMaximized() ?? false);
 ipcMain.handle("network:diagnostics", () => desktopNetworkDiagnostics());
+ipcMain.handle("supabase-sync:open-oauth", async (_event, value) => {
+  const url = new URL(String(value));
+  const allowedHost = url.hostname === "foimoeozpdtjvevjmxuj.supabase.co" || url.hostname === "accounts.google.com";
+  if (url.protocol !== "https:" || !allowedHost) throw new Error("拒绝打开未知的登录地址。 ");
+  await shell.openExternal(url.toString());
+  return { ok: true };
+});
 ipcMain.handle("backup:export", async () => {
   const backup = await localBackupApi("/api/backup");
   const result = await dialog.showSaveDialog(mainWindow, { title: "导出加密迁移文件", defaultPath: `study-desk-${new Date().toISOString().slice(0, 10)}.studydesk`, filters: [{ name: "Study Desk 加密迁移文件", extensions: ["studydesk"] }] });

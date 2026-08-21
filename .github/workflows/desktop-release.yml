@@ -26,6 +26,11 @@ jobs:
   build-macos:
     needs: verify
     runs-on: macos-14
+    env:
+      NEXT_PUBLIC_STUDY_DESK_SERVICE_URL: https://study-desk.jiko-official.top
+      STUDY_DESK_TRANSFER_KEY_VERSION: ${{ secrets.STUDY_DESK_TRANSFER_KEY_VERSION }}
+      STUDY_DESK_TRANSFER_KEY_CURRENT: ${{ secrets.STUDY_DESK_TRANSFER_KEY_CURRENT }}
+      STUDY_DESK_TRANSFER_KEY_PREVIOUS: ${{ secrets.STUDY_DESK_TRANSFER_KEY_PREVIOUS }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -43,6 +48,11 @@ jobs:
   build-windows:
     needs: verify
     runs-on: windows-latest
+    env:
+      NEXT_PUBLIC_STUDY_DESK_SERVICE_URL: https://study-desk.jiko-official.top
+      STUDY_DESK_TRANSFER_KEY_VERSION: ${{ secrets.STUDY_DESK_TRANSFER_KEY_VERSION }}
+      STUDY_DESK_TRANSFER_KEY_CURRENT: ${{ secrets.STUDY_DESK_TRANSFER_KEY_CURRENT }}
+      STUDY_DESK_TRANSFER_KEY_PREVIOUS: ${{ secrets.STUDY_DESK_TRANSFER_KEY_PREVIOUS }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5

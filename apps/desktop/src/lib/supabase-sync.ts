@@ -3,7 +3,9 @@ import { createBackup, parseBackup, previewBackup, restoreBackup } from "@/lib/b
 import { sqlite } from "@/lib/db";
 import { followingSyncAt, scheduledSyncAt, syncDelay } from "@/lib/sync-schedule";
 
-type Session = { access_token: string; refresh_token: string; user: { email?: string | null } };
+type Session = { access_token: string; refresh_token: string; user: { id?: string; email?: string | null } };
+export type AuthIdentity = { id: string; provider: string; email: string | null };
+export type AuthAccount = { user: { id: string; email: string | null }; identities: AuthIdentity[]; availableProviders: string[] };
 type RemoteDocument = { version: number; backup: unknown; updated_at: string };
 type RemoteHistory = { id: string; version: number; backup: unknown; created_at: string };
 export type SupabaseSyncStatus = { configured: boolean; enabled: boolean; signedIn: boolean; email: string | null; lastSyncedAt: string | null; nextSyncAt: string | null; lastError: string | null; summary: string | null; pendingChoice: boolean };
@@ -76,6 +78,21 @@ export function getSupabaseSyncStatus(): SupabaseSyncStatus {
 
 export function setSupabaseEnabled(enabled: boolean) { save("supabaseSyncEnabled", String(enabled)); const status = getSupabaseSyncStatus(); ensureSupabaseSyncSchedule(); return status; }
 export async function requestMagicLink(email: string) { return serviceRequest<{ ok: true }>("/api/service/auth/magic-link", { method: "POST", body: JSON.stringify({ email }) }); }
+export async function startGoogleOAuth(intent: "sign-in" | "link", sessionValue?: string) {
+  const session = intent === "link" ? await requireSession(sessionValue) : undefined;
+  return serviceRequest<{ authorizationUrl: string }>("/api/service/auth/oauth/start", { method: "POST", body: JSON.stringify({ provider: "google", intent }) }, session);
+}
+export async function completeOAuthHandoff(handoffToken: string) {
+  return serviceRequest<{ session: Session; intent: "sign-in" | "link" }>("/api/service/auth/oauth/complete", { method: "POST", body: JSON.stringify({ handoffToken }) });
+}
+export async function getAuthAccount(sessionValue?: string) { return serviceRequest<AuthAccount>("/api/service/auth/account", {}, await requireSession(sessionValue)); }
+export async function unlinkAuthIdentity(identityId: string, sessionValue?: string) { return serviceRequest<{ ok: true }>(`/api/service/auth/identities/${encodeURIComponent(identityId)}`, { method: "DELETE" }, await requireSession(sessionValue)); }
+export async function logoutAccount(sessionValue?: string) {
+  const session = sessionFrom(sessionValue);
+  try { if (session?.access_token) await serviceRequest<{ ok: true }>("/api/service/auth/logout", { method: "POST", body: "{}" }, session); }
+  finally { process.env.MOCK_INTERVIEW_SUPABASE_SESSION = ""; notifyDesktopSession({ type: "supabase-sync:session-expired" }); }
+  return { ok: true as const };
+}
 export async function getMembershipOverview(sessionValue?: string) { return serviceRequest<MembershipOverview>("/api/service/membership", {}, await requireSession(sessionValue)); }
 export async function startMembershipTrial(sessionValue?: string) { return serviceRequest<{ membership: AccountMembership }>("/api/service/membership/trial", { method: "POST", body: "{}" }, await requireSession(sessionValue)); }
 export async function createMembershipCheckout(plan: "monthly" | "yearly", sessionValue?: string) { return serviceRequest<{ transactionId: string; checkoutUrl: string | null; environment: "sandbox" | "production"; clientToken: string | null }>("/api/service/membership/checkout", { method: "POST", body: JSON.stringify({ plan }) }, await requireSession(sessionValue)); }

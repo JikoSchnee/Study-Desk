@@ -52,6 +52,7 @@ declare global {
       supabaseSync: {
         sessionStatus(): Promise<{ configured: boolean; signedIn: boolean; email: string | null; secureStorageAvailable: boolean }>;
         saveSession(value: string): Promise<{ configured: boolean; secureStorageAvailable: boolean }>;
+        openOAuth(url: string): Promise<{ ok: true }>;
         onMagicLink(listener: (result: { ok: boolean; message: string }) => void): () => void;
         onSessionChange(listener: (result: { configured: boolean; signedIn: boolean; email: string | null; secureStorageAvailable: boolean }) => void): () => void;
       };

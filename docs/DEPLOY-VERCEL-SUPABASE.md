@@ -10,11 +10,13 @@
 2. `supabase/migrations/20260820_community_marketplace.sql`
 3. `supabase/migrations/20260820_service_gateway.sql`
 4. `supabase/migrations/20260821_membership_cloud_sync.sql`
+5. `supabase/migrations/20260822_google_oauth_handoff.sql`
 
 在 Authentication 的 URL Configuration 中加入桌面回调：
 
 ```text
 study-desk://auth/callback
+https://study-desk.jiko-official.top/api/service/auth/oauth/callback/**
 ```
 
 Magic Link 邮件模板必须保留 `{{ .ConfirmationURL }}`。
@@ -29,6 +31,8 @@ Magic Link 邮件模板必须保留 `{{ .ConfirmationURL }}`。
 SUPABASE_URL=https://你的项目.supabase.co
 SUPABASE_ANON_KEY=公开的 publishable/anon key
 SUPABASE_SERVICE_ROLE_KEY=服务端 service_role/secret key
+STUDY_DESK_PUBLIC_URL=https://study-desk.jiko-official.top
+STUDY_DESK_AUTH_HANDOFF_KEY=另一个独立生成的32字节Base64随机值
 PADDLE_ENV=sandbox
 PADDLE_API_KEY=pdl_sdbx_apikey_...
 PADDLE_CLIENT_TOKEN=test_...
@@ -40,7 +44,20 @@ CRON_SECRET=使用密码生成器创建的随机值
 
 `SUPABASE_SERVICE_ROLE_KEY` 只能放在 Vercel 服务端环境变量中，绝不能添加 `NEXT_PUBLIC_` 前缀，也不能写入桌面安装包。
 
-绑定稳定域名（例如 `api.example.com`）后重新部署。桌面客户端不应使用会随部署变化的 Preview URL。
+在 Vercel 项目 Domains 中添加 `study-desk.jiko-official.top`。DNS 服务商添加主机记录 `study-desk` 的 CNAME，目标优先使用 Vercel 页面显示的项目专用值；若没有专用值，再使用 `cname.vercel-dns-0.com`。删除同名 A、AAAA 或旧 CNAME；Cloudflare 验证期间使用“仅 DNS”。Vercel 若要求所有权验证，再按页面添加 `_vercel` TXT。验证并签发 HTTPS 后将其设为 Production 主域名。旧 `vercel.app` 域名暂时保留，兼容旧客户端。
+
+`STUDY_DESK_AUTH_HANDOFF_KEY` 可用 `openssl rand -base64 32` 生成，必须与迁移主密钥不同。它只保存在 Vercel，用于加密最长 10 分钟的 PKCE verifier 和最长 5 分钟的一次性会话交接数据。
+
+### Google 登录
+
+1. 先确认官网 `/privacy` 和 `/terms` 均可通过 HTTPS 访问。
+2. 在 Google Search Console 使用 DNS TXT 验证根域名 `jiko-official.top`。
+3. 在 Google Auth Platform 创建 External 应用并发布到 Production。首页填 `https://study-desk.jiko-official.top`，隐私政策填 `/privacy`，服务条款填 `/terms`，授权域名填 `jiko-official.top`。
+4. 创建 Web application OAuth 客户端，Authorized redirect URI 只填 Supabase 回调 `https://foimoeozpdtjvevjmxuj.supabase.co/auth/v1/callback`。只使用 `openid email profile` 基础权限。
+5. 在 Supabase Authentication → Providers → Google 填入 Client ID 和 Client Secret 并启用；在 Auth General Configuration 启用 Allow manual linking。
+6. 在 URL Configuration 将 Site URL 改为 `https://study-desk.jiko-official.top`，并保留桌面深链和同域 OAuth 回调通配地址。
+
+Google Client Secret 只进入 Supabase Provider，不进入 Vercel、GitHub Actions、桌面安装包或 Git。两个已经存在的不同 Supabase 用户不会合并；不同邮箱必须先登录原账号，再从桌面设置主动绑定。
 
 ## 3. 配置 Paddle Sandbox
 
@@ -63,7 +80,7 @@ Vercel 会按 `vercel.json` 每日请求清理接口。Vercel Cron 自动使用 
 在构建安装包的环境中设置：
 
 ```text
-NEXT_PUBLIC_STUDY_DESK_SERVICE_URL=https://api.example.com
+NEXT_PUBLIC_STUDY_DESK_SERVICE_URL=https://study-desk.jiko-official.top
 STUDY_DESK_TRANSFER_KEY_VERSION=1
 STUDY_DESK_TRANSFER_KEY_CURRENT=32字节随机值的Base64
 STUDY_DESK_TRANSFER_KEY_PREVIOUS={}
@@ -72,6 +89,8 @@ STUDY_DESK_TRANSFER_KEY_PREVIOUS={}
 迁移主密钥可用 `openssl rand -base64 32` 生成。`npm run desktop:dist` 会拒绝缺少或长度不正确的密钥。轮换时提高版本号，把旧版本及其 Base64 密钥加入 `STUDY_DESK_TRANSFER_KEY_PREVIOUS`，例如 `{"1":"旧密钥"}`；确认所有仍需导入的旧文件超过支持期后，才可从旧密钥环移除。
 
 然后按现有发布流程构建。服务 URL 只是公开 API 域名，不包含任何 Supabase 密钥。生产构建缺少它时，账号登录和云同步会明确报错。迁移密钥只编译进 Electron 主进程包，不进入 Next.js 浏览器代码；由于离线导入必须具备解密能力，它能阻止普通解包和篡改，不能承诺抵抗专业逆向。
+
+仓库的 `desktop-release.yml` 已固定生产服务 URL，并从 GitHub Actions Secrets 读取三个迁移密钥变量。发布新版本前必须在仓库 Secrets 中配置它们；OAuth handoff 密钥不需要也不允许放入桌面发布工作流。
 
 ## 5. 发布前检查
 
@@ -84,7 +103,7 @@ STUDY_DESK_TRANSFER_KEY_PREVIOUS={}
 
 ## 6. 安全边界
 
-- 客户端用邮箱 Magic Link 获得用户 JWT，并将会话保存在系统安全存储中。
+- 客户端可用邮箱 Magic Link 或 Google 登录获得用户 JWT，并将会话保存在系统安全存储中。Google 授权在系统浏览器完成，自定义协议只携带一次性交接码，不携带长期令牌。
 - Vercel 每次请求都调用 Supabase Auth 验证 JWT；验证后才使用 service-role 客户端读写该用户的数据。
 - 同步查询始终显式添加 `user_id = 已验证账号`，写入通过只授予 `service_role` 的 RPC 完成。
 - 同步采用乐观版本号，两个设备同时写入时返回冲突并重新合并，避免静默覆盖。

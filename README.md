@@ -51,6 +51,8 @@
 
 服务端采用 Vercel + Supabase，支付采用 Paddle 托管 Checkout。客户端不能提交价格或自行开通权益；只有签名验证通过的 `transaction.completed` Webhook 会增加 30 天或 365 天会员时长。完整部署步骤和环境变量见 [部署说明](docs/DEPLOY-VERCEL-SUPABASE.md)。
 
+生产服务域名为 `https://study-desk.jiko-official.top`。账号支持邮箱 Magic Link 与 Google 登录；Google 授权在系统浏览器完成，返回桌面端的自定义协议只包含短期一次性交接码。相同已验证邮箱可由 Supabase 自动关联，不同邮箱应先登录原账号后在设置中主动绑定；不同的既有账号不会合并。
+
 ## MCP（供 Agent 使用）
 
 开发环境可通过以下命令启动本地 MCP Server：
