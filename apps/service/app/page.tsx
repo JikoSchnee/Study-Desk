@@ -94,7 +94,7 @@ export default function HomePage() {
     <footer>
       <a className="brand footer-brand" href="#top"><span>S</span><strong>Study Desk</strong></a>
       <p>把知识练成自己的。</p>
-      <div><a href={GITHUB_URL} target="_blank" rel="noreferrer">GitHub</a><a href={RELEASES_URL} target="_blank" rel="noreferrer">Releases</a><span><i /> 云服务在线</span></div>
+      <div><a href="/privacy">隐私政策</a><a href="/terms">服务条款</a><a href={GITHUB_URL} target="_blank" rel="noreferrer">GitHub</a><a href={RELEASES_URL} target="_blank" rel="noreferrer">Releases</a><span><i /> 云服务在线</span></div>
     </footer>
   </main>;
 }

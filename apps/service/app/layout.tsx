@@ -5,6 +5,7 @@ import "@fontsource/nunito/800.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://study-desk.jiko-official.top"),
   title: "Study Desk · 把知识练成自己的",
   description: "用知识卡片整理、练习和复习，让学过的内容真正变成随时能说出口的答案。下载 Windows 与 Apple Silicon macOS 桌面版。",
   applicationName: "Study Desk",
