@@ -1,18 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { createServiceSupabase, serviceError } from "@service/lib/service-supabase";
+import { serviceError } from "@service/lib/service-supabase";
+import { sendEmailLogin } from "@service/lib/email-auth";
 
-const inputSchema = z.object({ email: z.string().email() });
+const inputSchema = z.object({ email: z.string().email(), client: z.enum(["desktop", "web"]).default("desktop"), returnPath: z.string().max(200).optional() });
 
 export async function POST(request: Request) {
   try {
-    const { email } = inputSchema.parse(await request.json());
-    const { error } = await createServiceSupabase().auth.signInWithOtp({
-      email,
-      options: { shouldCreateUser: true, emailRedirectTo: "study-desk://auth/callback" },
-    });
-    if (error) throw error;
-    return NextResponse.json({ ok: true });
+    const input = inputSchema.parse(await request.json());
+    return NextResponse.json(await sendEmailLogin(input));
   } catch (error) {
     if (error instanceof z.ZodError) return NextResponse.json({ error: "请输入有效邮箱。" }, { status: 400 });
     const failure = serviceError(error);

@@ -23,7 +23,13 @@ function desktopAccessToken() {
 }
 
 export async function requireCommunityViewer(request: Request): Promise<CommunityViewer> {
-  const accessToken = bearerToken(request) || desktopAccessToken();
+  let accessToken = bearerToken(request) || desktopAccessToken();
+  if (!accessToken && request.headers.get("cookie")) {
+    try {
+      const { resolveWebSession } = await import("@service/lib/web-session");
+      accessToken = (await resolveWebSession(request)).token;
+    } catch { accessToken = ""; }
+  }
   const config = supabaseConfig();
   if (!accessToken || !config.url || !config.anonKey) {
     if (process.env.NODE_ENV !== "production") return { id: "00000000-0000-4000-8000-000000000001", email: "demo@study-desk.local", accessToken: "demo" };
@@ -33,6 +39,24 @@ export async function requireCommunityViewer(request: Request): Promise<Communit
   const { data, error } = await client.auth.getUser(accessToken);
   if (error || !data.user) throw new Error("COMMUNITY_AUTH_REQUIRED");
   return { id: data.user.id, email: data.user.email ?? null, accessToken };
+}
+
+export async function authorizedCommunityCard(request: Request, id: string, position: number) {
+  const viewer = await requireCommunityViewer(request);
+  const api = communitySupabase(viewer.accessToken);
+  if (!api) throw new Error("COMMUNITY_AUTH_REQUIRED");
+  let targetId = id;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+    const lookup = await api.from("community_knowledge_bases").select("id").eq("slug", id).maybeSingle();
+    if (lookup.error) throw lookup.error;
+    if (!lookup.data?.id) throw new Error("COMMUNITY_CARD_NOT_FOUND");
+    targetId = String(lookup.data.id);
+  }
+  const result = await api.rpc("get_community_card", { target_id: targetId, target_position: position });
+  if (result.error) throw result.error;
+  const card = result.data?.[0];
+  if (!card) throw new Error("COMMUNITY_CARD_NOT_FOUND");
+  return { viewer, knowledgeBaseId: targetId, card };
 }
 
 export function communitySupabase(accessToken: string) {

@@ -133,11 +133,23 @@ export async function syncSupabase(choice: "merge" | "remote" | "local" = "merge
     const session = await requireSession(sessionValue);
     if (!getSupabaseSyncStatus().enabled) throw new Error("账号云同步未启用。");
     const data = await remoteDocument(session);
-    if (data && choice !== "local") { const incoming = parseBackup(data.backup); restoreBackup(incoming, choice === "remote" ? "replace" : "merge"); }
-    let written: number;
-    try { written = await writeBackup(session, Number(data?.version ?? 0), createBackup()); }
-    catch (error) { if (error instanceof Error && error.message.includes("另一台设备")) save("supabaseSyncPendingChoice", "true"); throw error; }
-    save("supabaseSyncPendingChoice", "false"); save("supabaseSyncLastSyncedAt", new Date().toISOString()); save("supabaseSyncLastError", ""); save("supabaseSyncLastSummary", data ? `已${choice === "remote" ? "采用云端数据" : choice === "local" ? "上传本机数据" : "合并"}并同步完整学习数据。` : "已上传首份账号云端数据。");
+    if (data) { const incoming = parseBackup(data.backup); restoreBackup(incoming, choice === "remote" ? "replace" : "merge"); }
+    let written = 0;
+    let expectedVersion = Number(data?.version ?? 0);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try { written = await writeBackup(session, expectedVersion, createBackup()); break; }
+      catch (error) {
+        if (!(error instanceof Error) || !error.message.includes("另一台设备") || attempt === 2) {
+          if (error instanceof Error && error.message.includes("另一台设备")) save("supabaseSyncPendingChoice", "true");
+          throw error;
+        }
+        const latest = await remoteDocument(session);
+        if (!latest) { expectedVersion = 0; continue; }
+        restoreBackup(parseBackup(latest.backup), "merge");
+        expectedVersion = Number(latest.version);
+      }
+    }
+    save("supabaseSyncPendingChoice", "false"); save("supabaseSyncLastSyncedAt", new Date().toISOString()); save("supabaseSyncLastError", ""); save("supabaseSyncLastSummary", data ? `已${choice === "remote" ? "采用云端数据" : "合并双端更改"}并同步完整学习数据。` : "已上传首份账号云端数据。");
     return { summary: setting("supabaseSyncLastSummary")!, version: written as number | null };
   } catch (error) { const message = friendlySupabaseError(error); save("supabaseSyncLastError", message); throw new Error(message); }
   finally { syncing = false; scheduleNextSupabaseSync(); }

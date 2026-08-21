@@ -16,6 +16,7 @@ export default function HomePage() {
     <nav className="topbar" aria-label="主要导航">
       <a className="brand" href="#top" aria-label="Study Desk 首页"><span>S</span><strong>Study Desk</strong></a>
       <div className="nav-links">
+        <a href="/app">浏览器打开</a>
         <a href="#features">学习方式</a>
         <a href="#download">下载</a>
         <a className="nav-github" href={GITHUB_URL} target="_blank" rel="noreferrer">GitHub <ArrowUpRight /></a>
@@ -29,7 +30,7 @@ export default function HomePage() {
         <p className="hero-lead">把零散资料整理成自己的知识卡片，通过一次次主动回忆，让学过的内容真正变成随时能说出口的答案。</p>
         <div className="hero-actions">
           <a className="primary-action" href="#download">免费下载桌面版</a>
-          <a className="secondary-action" href={GITHUB_URL} target="_blank" rel="noreferrer">查看源代码</a>
+          <a className="secondary-action" href="/app">使用浏览器版</a>
         </div>
         <p className="platform-note">支持 Windows 10/11 与 Apple Silicon Mac</p>
       </div>
@@ -94,7 +95,7 @@ export default function HomePage() {
     <footer>
       <a className="brand footer-brand" href="#top"><span>S</span><strong>Study Desk</strong></a>
       <p>把知识练成自己的。</p>
-      <div><a href="/privacy">隐私政策</a><a href="/terms">服务条款</a><a href={GITHUB_URL} target="_blank" rel="noreferrer">GitHub</a><a href={RELEASES_URL} target="_blank" rel="noreferrer">Releases</a><span><i /> 云服务在线</span></div>
+      <div><a href="/app">浏览器版</a><a href="/privacy">隐私政策</a><a href="/terms">服务条款</a><a href={GITHUB_URL} target="_blank" rel="noreferrer">GitHub</a><a href={RELEASES_URL} target="_blank" rel="noreferrer">Releases</a><span><i /> 云服务在线</span></div>
     </footer>
   </main>;
 }

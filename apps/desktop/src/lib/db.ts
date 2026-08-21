@@ -58,6 +58,8 @@ ensureColumn("review_logs", "presented_question", "TEXT");
 ensureColumn("review_logs", "feedback", "TEXT");
 ensureColumn("review_logs", "next_due_at", "TEXT");
 ensureColumn("review_logs", "is_initial", "INTEGER NOT NULL DEFAULT 0");
+ensureColumn("review_logs", "evaluation_source", "TEXT NOT NULL DEFAULT 'local'");
+ensureColumn("review_state", "updated_at", "TEXT NOT NULL DEFAULT ''");
 ensureColumn("daily_tasks", "completed_at", "TEXT");
 ensureColumn("daily_tasks", "study_plan_id", "TEXT");
 ensureColumn("interview_turns", "comparison_mode", "TEXT");

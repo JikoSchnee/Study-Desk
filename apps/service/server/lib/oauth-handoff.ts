@@ -4,6 +4,7 @@ import { createServiceSupabase } from "@service/lib/service-supabase";
 
 export type OAuthIntent = "sign-in" | "link";
 export type OAuthProvider = "google";
+export type OAuthClient = "desktop" | "web";
 export type DesktopAuthSession = {
   access_token: string;
   refresh_token: string;
@@ -14,6 +15,8 @@ type FlowRow = {
   id: string;
   provider: OAuthProvider;
   intent: OAuthIntent;
+  client: OAuthClient;
+  return_path: string | null;
   initiating_user_id: string | null;
   verifier_ciphertext: string | null;
   expires_at: string;
@@ -73,7 +76,15 @@ function providerUrl(pathname: string, flowId: string, verifier: string, skipHtt
   return url;
 }
 
-export async function startOAuthFlow(input: { intent: OAuthIntent; initiatingUserId?: string; accessToken?: string }) {
+function safeReturnPath(value?: string) { return value?.startsWith("/app") && !value.startsWith("//") ? value : "/app"; }
+
+export async function authFlowDestination(flowId: string) {
+  const selected = await createServiceSupabase().from("study_desk_auth_flows").select("client, return_path").eq("id", flowId).maybeSingle();
+  const client = selected.data?.client === "web" ? "web" : "desktop";
+  return { client, returnPath: safeReturnPath(selected.data?.return_path ?? undefined) } as const;
+}
+
+export async function startOAuthFlow(input: { intent: OAuthIntent; client?: OAuthClient; returnPath?: string; initiatingUserId?: string; accessToken?: string }) {
   const id = randomUUID();
   const verifier = randomBytes(48).toString("base64url");
   const supabase = createServiceSupabase();
@@ -81,6 +92,8 @@ export async function startOAuthFlow(input: { intent: OAuthIntent; initiatingUse
     id,
     provider: "google",
     intent: input.intent,
+    client: input.client ?? "desktop",
+    return_path: input.client === "web" ? safeReturnPath(input.returnPath) : null,
     initiating_user_id: input.intent === "link" ? input.initiatingUserId : null,
     verifier_ciphertext: encryptAuthSecret(verifier),
     expires_at: new Date(Date.now() + flowLifetimeMs).toISOString(),
@@ -115,13 +128,19 @@ async function exchangeCode(code: string, verifier: string): Promise<DesktopAuth
 
 export async function completeOAuthCallback(flowId: string, code: string) {
   const supabase = createServiceSupabase();
-  const selected = await supabase.from("study_desk_auth_flows").select("id, provider, intent, initiating_user_id, verifier_ciphertext, expires_at").eq("id", flowId).is("completed_at", null).maybeSingle();
+  const selected = await supabase.from("study_desk_auth_flows").select("id, provider, intent, client, return_path, initiating_user_id, verifier_ciphertext, expires_at").eq("id", flowId).is("completed_at", null).maybeSingle();
   if (selected.error) throw selected.error;
   const flow = selected.data as FlowRow | null;
   if (!flow?.verifier_ciphertext || Date.parse(flow.expires_at) <= Date.now()) throw new Error("OAuth 流程已失效，请重新开始。 ");
 
   const session = await exchangeCode(code, decryptAuthSecret<string>(flow.verifier_ciphertext));
   if (flow.intent === "link" && session.user.id !== flow.initiating_user_id) throw new Error("Google 身份属于另一个账号，不支持合并不同账号。 ");
+
+  if (flow.client === "web") {
+    const updated = await supabase.from("study_desk_auth_flows").update({ verifier_ciphertext: null, completed_at: new Date().toISOString() }).eq("id", flowId).is("completed_at", null).select("id").maybeSingle();
+    if (updated.error || !updated.data) throw updated.error ?? new Error("OAuth 流程已经完成。 ");
+    return { client: "web" as const, session, intent: flow.intent, returnPath: safeReturnPath(flow.return_path ?? undefined) };
+  }
 
   const handoffToken = randomBytes(32).toString("base64url");
   const completedAt = new Date().toISOString();
@@ -133,7 +152,7 @@ export async function completeOAuthCallback(flowId: string, code: string) {
     completed_at: completedAt,
   }).eq("id", flowId).is("completed_at", null).select("id").maybeSingle();
   if (updated.error || !updated.data) throw updated.error ?? new Error("OAuth 流程已经完成。 ");
-  return { handoffToken, intent: flow.intent };
+  return { client: "desktop" as const, handoffToken, intent: flow.intent };
 }
 
 export async function consumeOAuthHandoff(handoffToken: string) {

@@ -2,11 +2,12 @@ import "server-only";
 import { sqlite } from "@/lib/db";
 import { randomUUID } from "node:crypto";
 import { backupTableNames, isLocalOnlyBackupSetting } from "@/lib/backup-policy";
+import type { SyncBackup } from "@shared/sync";
 
-export const BACKUP_VERSION = 8;
+export const BACKUP_VERSION = 9;
 const tables = backupTableNames;
 type BackupTable = (typeof tables)[number];
-export type AppBackup = { version: number; exportedAt: string; tables: Record<BackupTable, Record<string, unknown>[]> };
+export type AppBackup = SyncBackup<BackupTable>;
 
 function backupRows(table: BackupTable) {
   const rows = sqlite.prepare(`SELECT * FROM ${table}`).all() as Record<string, unknown>[];
@@ -26,7 +27,7 @@ export function createBackup(): AppBackup {
 export function parseBackup(value: unknown): AppBackup {
   if (!value || typeof value !== "object") throw new Error("备份文件不是有效 JSON 对象。");
   const backup = value as Partial<AppBackup>;
-  if (![1, 2, 3, 4, 5, 6, 7, BACKUP_VERSION].includes(Number(backup.version)) || !backup.tables || typeof backup.tables !== "object") throw new Error("不支持此备份版本。");
+  if (![1, 2, 3, 4, 5, 6, 7, 8, BACKUP_VERSION].includes(Number(backup.version)) || !backup.tables || typeof backup.tables !== "object") throw new Error("不支持此备份版本。");
   const legacyTables = tables.filter((table) => !["knowledge_bases", "study_plans", "study_plan_knowledge_bases", "card_relations", "initial_study_logs", "daily_reports", "daily_report_items", "tags"].includes(table));
   for (const table of legacyTables) if (!Array.isArray(backup.tables[table])) throw new Error(`备份缺少 ${table} 数据。`);
   if (Number(backup.version) >= 3 && !Array.isArray(backup.tables.card_relations)) throw new Error("备份缺少 card_relations 数据。");
@@ -76,7 +77,9 @@ export function restoreBackup(backup: AppBackup, mode: "merge" | "replace") {
       for (const row of backup.tables[table]) {
         const existing = sqlite.prepare(`SELECT * FROM ${table} WHERE ${key} = ?`).get(row[key]) as Record<string, unknown> | undefined;
         if (!existing) { insert(table, row); continue; }
-        if ((table === "cards" || table === "knowledge_bases" || table === "study_plans") && String(row.updated_at ?? "") > String(existing.updated_at ?? "")) {
+        const incomingWins = (table === "cards" || table === "knowledge_bases" || table === "study_plans" || table === "review_state") && String(row.updated_at ?? "") > String(existing.updated_at ?? "");
+        const completedTaskWins = table === "daily_tasks" && row.status === "done" && existing.status !== "done";
+        if (incomingWins || completedTaskWins) {
           const keys = Object.keys(row).filter((column) => column !== key);
           sqlite.prepare(`UPDATE ${table} SET ${keys.map((column) => `${column} = ?`).join(", ")} WHERE ${key} = ?`).run(...keys.map((column) => row[column]), row[key]);
         }

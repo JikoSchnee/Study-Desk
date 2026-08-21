@@ -22,7 +22,9 @@ export function bearerToken(request: Request) {
 }
 
 export async function requireServiceUser(request: Request) {
-  const token = bearerToken(request);
+  let token = "";
+  try { token = bearerToken(request); } catch { /* A same-origin web cookie may authenticate below. */ }
+  if (!token) return (await import("@service/lib/web-session")).resolveWebSession(request);
   const supabase = createServiceSupabase();
   const { data, error } = await supabase.auth.getUser(token);
   if (error || !data.user) throw new Error("SERVICE_AUTH_REQUIRED");
@@ -32,6 +34,7 @@ export async function requireServiceUser(request: Request) {
 export function serviceError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error ?? "");
   if (message.includes("SERVICE_AUTH_REQUIRED")) return { status: 401, message: "登录已失效，请重新登录。" };
+  if (message.includes("WEB_CSRF_INVALID")) return { status: 403, message: "网页安全校验失败，请刷新页面后重试。" };
   if (message.includes("MEMBERSHIP_READ_ONLY")) return { status: 403, message: "会员已到期，当前处于 30 天只读宽限期；续费后才能继续上传。" };
   if (message.includes("MEMBERSHIP_REQUIRED")) return { status: 402, message: "云同步需要有效试用或会员，请先开始 7 天试用或充值会员。" };
   if (message.includes("TRIAL_ALREADY_USED")) return { status: 409, message: "此账号已经领取过 7 天试用。" };

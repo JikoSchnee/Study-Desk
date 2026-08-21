@@ -11,12 +11,14 @@
 3. `supabase/migrations/20260820_service_gateway.sql`
 4. `supabase/migrations/20260821_membership_cloud_sync.sql`
 5. `supabase/migrations/20260822_google_oauth_handoff.sql`
+6. `supabase/migrations/20260823_web_client.sql`
 
 在 Authentication 的 URL Configuration 中加入桌面回调：
 
 ```text
 study-desk://auth/callback
 https://study-desk.jiko-official.top/api/service/auth/oauth/callback/**
+https://study-desk.jiko-official.top/api/service/auth/email/callback/**
 ```
 
 Magic Link 邮件模板必须保留 `{{ .ConfirmationURL }}`。
@@ -33,6 +35,7 @@ SUPABASE_ANON_KEY=公开的 publishable/anon key
 SUPABASE_SERVICE_ROLE_KEY=服务端 service_role/secret key
 STUDY_DESK_PUBLIC_URL=https://study-desk.jiko-official.top
 STUDY_DESK_AUTH_HANDOFF_KEY=另一个独立生成的32字节Base64随机值
+STUDY_DESK_WEB_SESSION_KEY=第三个独立生成的32字节Base64随机值
 PADDLE_ENV=sandbox
 PADDLE_API_KEY=pdl_sdbx_apikey_...
 PADDLE_CLIENT_TOKEN=test_...
@@ -48,6 +51,10 @@ CRON_SECRET=使用密码生成器创建的随机值
 
 `STUDY_DESK_AUTH_HANDOFF_KEY` 可用 `openssl rand -base64 32` 生成，必须与迁移主密钥不同。它只保存在 Vercel，用于加密最长 10 分钟的 PKCE verifier 和最长 5 分钟的一次性会话交接数据。
 
+`STUDY_DESK_WEB_SESSION_KEY` 也用 `openssl rand -base64 32` 单独生成，不能与任何迁移或认证密钥复用。它只保存在 Vercel，用来加密浏览器 HttpOnly 会话及最长 15 分钟的评分确认记录。
+
+浏览器评分至少配置一家 OpenAI-compatible 服务。通过 `STUDY_DESK_AI_PROVIDER_ORDER` 设置回退顺序，并为对应供应商填写 `STUDY_DESK_AI_<供应商>_API_KEY` 与 `STUDY_DESK_AI_<供应商>_MODEL`；自定义供应商还必须填写 `STUDY_DESK_AI_CUSTOM_BASE_URL`。未配置或全部调用失败时，网页会自动显示参考答案并转为自评。
+
 ### Google 登录
 
 1. 先确认官网 `/privacy` 和 `/terms` 均可通过 HTTPS 访问。
@@ -55,9 +62,9 @@ CRON_SECRET=使用密码生成器创建的随机值
 3. 在 Google Auth Platform 创建 External 应用并发布到 Production。首页填 `https://study-desk.jiko-official.top`，隐私政策填 `/privacy`，服务条款填 `/terms`，授权域名填 `jiko-official.top`。
 4. 创建 Web application OAuth 客户端，Authorized redirect URI 只填 Supabase 回调 `https://foimoeozpdtjvevjmxuj.supabase.co/auth/v1/callback`。只使用 `openid email profile` 基础权限。
 5. 在 Supabase Authentication → Providers → Google 填入 Client ID 和 Client Secret 并启用；在 Auth General Configuration 启用 Allow manual linking。
-6. 在 URL Configuration 将 Site URL 改为 `https://study-desk.jiko-official.top`，并保留桌面深链和同域 OAuth 回调通配地址。
+6. 在 URL Configuration 将 Site URL 改为 `https://study-desk.jiko-official.top`，并保留桌面深链、同域 OAuth 回调和邮箱回调通配地址。
 
-Google Client Secret 只进入 Supabase Provider，不进入 Vercel、GitHub Actions、桌面安装包或 Git。两个已经存在的不同 Supabase 用户不会合并；不同邮箱必须先登录原账号，再从桌面设置主动绑定。
+Google Client Secret 只进入 Supabase Provider，不进入 Vercel、GitHub Actions、桌面安装包或 Git。两个已经存在的不同 Supabase 用户不会合并；不同邮箱必须先登录原账号，再从桌面端或 `/app/settings` 主动绑定。
 
 ## 3. 配置 Paddle Sandbox
 
@@ -66,7 +73,7 @@ Google Client Secret 只进入 Supabase Provider，不进入 Vercel、GitHub Act
 3. 新建 Webhook destination：
 
 ```text
-https://api.example.com/api/webhooks/paddle
+https://study-desk.jiko-official.top/api/webhooks/paddle
 ```
 
 至少订阅 `transaction.completed`、`transaction.canceled` 和 `adjustment.updated`。把 destination secret 写入 `PADDLE_WEBHOOK_SECRET`。

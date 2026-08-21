@@ -1,0 +1,20 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { Notice, WebShell, membershipLabel } from "../web-shell";
+import { webFetch } from "../web-client";
+
+type Session = { user: { email: string }; membership: { state: string; trialAvailable: boolean; activeUntil: string | null; graceEndsAt: string | null; usedBytes: number; quotaBytes: number }; aiQuota: { limit: number; used: number; remaining: number } };
+type Account = { identities: Array<{ id: string; provider: string; email: string | null }> };
+export default function SettingsPage() {
+  const [data, setData] = useState<Session | null>(null); const [account, setAccount] = useState<Account | null>(null); const [message, setMessage] = useState("");
+  function load() { Promise.all([webFetch<Session>("web/session"), webFetch<Account>("service/auth/account")]).then(([session, nextAccount]) => { setData(session); setAccount(nextAccount); }).catch((error) => setMessage(error.message)); }
+  useEffect(load, []);
+  async function trial() { try { await webFetch("service/membership/trial", { method: "POST", body: "{}" }); load(); } catch (error) { setMessage(error instanceof Error ? error.message : "领取失败"); } }
+  async function checkout(plan: "monthly" | "yearly") { try { const body = await webFetch<{ checkoutUrl: string | null }>("service/membership/checkout", { method: "POST", body: JSON.stringify({ plan }) }); if (body.checkoutUrl) location.assign(body.checkoutUrl); else setMessage("支付窗口尚未配置。"); } catch (error) { setMessage(error instanceof Error ? error.message : "无法创建支付"); } }
+  async function logout(all = false) { await webFetch(`web/${all ? "logout-all" : "logout"}`, { method: "POST", body: "{}" }); location.replace("/app/login"); }
+  async function linkGoogle() { try { const body = await webFetch<{ authorizationUrl: string }>("service/auth/oauth/start", { method: "POST", body: JSON.stringify({ provider: "google", intent: "link", client: "web", returnPath: "/app/settings" }) }); location.assign(body.authorizationUrl); } catch (error) { setMessage(error instanceof Error ? error.message : "无法关联 Google"); } }
+  async function unlinkGoogle(id: string) { try { await webFetch(`service/auth/identities/${id}`, { method: "DELETE" }); load(); } catch (error) { setMessage(error instanceof Error ? error.message : "无法解除关联"); } }
+  const google = account?.identities.find((identity) => identity.provider === "google");
+  return <WebShell title="账号与同步" eyebrow="安全设置">{message && <Notice kind="warn">{message}</Notice>}{data && <div className="settings-grid"><section className="settings-card"><small>当前账号</small><h2>{data.user.email}</h2><p>邮箱登录：{account?.identities.some((identity) => identity.provider === "email") ? "已绑定" : "未绑定"}<br />Google 登录：{google ? `已绑定 ${google.email ?? ""}` : "未绑定"}</p><div className="settings-actions">{google ? <button onClick={() => unlinkGoogle(google.id)}>解除 Google</button> : <button onClick={linkGoogle}>关联 Google</button>}<button onClick={() => logout(false)}>退出当前设备</button><button onClick={() => logout(true)}>退出全部设备</button></div></section><section className="settings-card membership-card"><small>会员云同步</small><h2>{membershipLabel(data.membership.state)}</h2><p>{data.membership.activeUntil ? `有效期至 ${new Date(data.membership.activeUntil).toLocaleDateString("zh-CN")}` : "充值后可在浏览器访问自建知识库并保存学习进度。"}</p><div className="usage"><i style={{ width: `${Math.min(100, data.membership.usedBytes / data.membership.quotaBytes * 100)}%` }} /></div><p>{(data.membership.usedBytes / 1024 / 1024).toFixed(1)} MB / 500 MB</p>{data.membership.trialAvailable && <button className="web-primary" onClick={trial}>开始 7 天试用</button>}<div className="plan-row"><button onClick={() => checkout("monthly")}><strong>¥15</strong><span>30 天</span></button><button onClick={() => checkout("yearly")}><strong>¥128</strong><span>365 天</span></button></div></section><section className="settings-card"><small>评分额度</small><h2>今日剩余 {data.aiQuota.remaining} / {data.aiQuota.limit}</h2><p>今天已成功评分 {data.aiQuota.used} 次，按北京时间自然日重置。免费额度仅用于社区练习；会员可用于自建和社区内容。</p><Notice>桌面端使用本地 BGE-M3，不消耗网页额度，可无限次评分。</Notice></section></div>}</WebShell>;
+}

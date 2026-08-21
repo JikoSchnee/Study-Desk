@@ -43,7 +43,8 @@ export function initializeReview(cardId: string) {
   const existing = sqlite.prepare("SELECT card_id FROM review_state WHERE card_id = ?").get(cardId);
   if (existing) return false;
   const card = createEmptyCard(new Date());
-  sqlite.prepare("INSERT INTO review_state (card_id, fsrs_card, due_at) VALUES (?, ?, ?)").run(cardId, JSON.stringify(card), new Date().toISOString());
+  const now = new Date().toISOString();
+  sqlite.prepare("INSERT INTO review_state (card_id, fsrs_card, due_at, updated_at) VALUES (?, ?, ?, ?)").run(cardId, JSON.stringify(card), now, now);
   return true;
 }
 
@@ -68,7 +69,7 @@ export function completeInitialStudy(cardId: string) {
   fsrsCard.due = new Date(dueAt);
   sqlite.transaction(() => {
     sqlite.prepare("INSERT INTO initial_study_logs (card_id, completed_at) VALUES (?, ?)").run(cardId, completedAt);
-    sqlite.prepare("INSERT INTO review_state (card_id, fsrs_card, due_at) VALUES (?, ?, ?)").run(cardId, JSON.stringify(fsrsCard), dueAt);
+    sqlite.prepare("INSERT INTO review_state (card_id, fsrs_card, due_at, updated_at) VALUES (?, ?, ?, ?)").run(cardId, JSON.stringify(fsrsCard), dueAt, completedAt);
     sqlite.prepare("UPDATE cards SET status = 'review', updated_at = ? WHERE id = ?").run(completedAt, cardId);
     completeTodayTaskForCard(cardId, "learn");
   })();
@@ -133,9 +134,9 @@ export function submitReview(cardId: string, response: string, score: number, su
   const next = scheduleCard(JSON.parse(row.fsrs_card), confirmedRating, new Date());
   const due = new Date(next.due as string | Date).toISOString();
   sqlite.transaction(() => {
-    sqlite.prepare("UPDATE review_state SET fsrs_card = ?, due_at = ? WHERE card_id = ?").run(JSON.stringify(next), due, cardId);
-    sqlite.prepare("INSERT INTO review_logs (id, card_id, response, ai_score, suggested_rating, confirmed_rating, comparison_mode, answer_comparison, presented_question, feedback, next_due_at, is_initial, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-      .run(randomUUID(), cardId, response, score, suggestedRating, confirmedRating, comparison?.requestedMode ?? null, comparison ? JSON.stringify(comparison) : null, presentedQuestion ?? null, feedback ?? null, due, isInitial ? 1 : 0, reviewedAt);
+    sqlite.prepare("UPDATE review_state SET fsrs_card = ?, due_at = ?, updated_at = ? WHERE card_id = ?").run(JSON.stringify(next), due, reviewedAt, cardId);
+    sqlite.prepare("INSERT INTO review_logs (id, card_id, response, ai_score, suggested_rating, confirmed_rating, comparison_mode, answer_comparison, presented_question, feedback, next_due_at, is_initial, evaluation_source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(randomUUID(), cardId, response, score, suggestedRating, confirmedRating, comparison?.requestedMode ?? null, comparison ? JSON.stringify(comparison) : null, presentedQuestion ?? null, feedback ?? null, due, isInitial ? 1 : 0, "local", reviewedAt);
     updateCardStatus(cardId, "review");
     completeTodayTaskForCard(cardId, "review");
     clearPriorityPractice(cardId);

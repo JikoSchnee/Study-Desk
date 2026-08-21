@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { POST as sendMagicLink } from "@service/routes/service/auth/magic-link/route";
+import { GET as emailCallback } from "@service/routes/service/auth/email/callback/route";
 import { POST as refreshSession } from "@service/routes/service/auth/refresh/route";
 import { GET as getAuthAccount } from "@service/routes/service/auth/account/route";
 import { DELETE as deleteAuthIdentity } from "@service/routes/service/auth/identities/[id]/route";
@@ -17,6 +18,8 @@ import { GET as getCommunityCatalog } from "@service/routes/community/catalog/ro
 import { POST as createCommunityCheckout } from "@service/routes/community/checkout/route";
 import { GET as getCommunityCard } from "@service/routes/community/knowledge-bases/[id]/cards/[position]/route";
 import { GET as getLatestRelease } from "@service/routes/release/latest/route";
+import { handleWebGet, handleWebPatch, handleWebPost, webRouteError } from "@service/routes/web/route";
+import { requireWebCsrf, resolveWebSession } from "@service/lib/web-session";
 
 export const dynamic = "force-dynamic";
 
@@ -33,14 +36,28 @@ function notFound() {
   return NextResponse.json({ error: "Not Found" }, { status: 404 });
 }
 
+async function protectCookieWrite(request: Request) {
+  if (!request.headers.get("cookie")?.includes("__Host-study_desk_session=")) return;
+  const auth = await resolveWebSession(request);
+  await requireWebCsrf(request, auth.webSessionId);
+}
+
 export async function GET(request: Request, context: RouteContext) {
   const path = (await context.params).path;
   const route = path.join("/");
+
+  if (path[0] === "web") {
+    try { return await handleWebGet(request, path.slice(1)) ?? notFound(); }
+    catch (error) { return webRouteError(error); }
+  }
 
   if (route === "service/membership") return getMembership(request);
   if (route === "service/auth/account") return getAuthAccount(request);
   if (path.length === 5 && path.slice(0, 4).join("/") === "service/auth/oauth/callback") {
     return oauthCallback(request, { params: Promise.resolve({ flowId: path[4] }) });
+  }
+  if (path.length === 5 && path.slice(0, 4).join("/") === "service/auth/email/callback") {
+    return emailCallback(request, { params: Promise.resolve({ flowId: path[4] }) });
   }
   if (route === "service/sync") return readSync(request);
   if (route === "service/maintenance/cloud-cleanup") return cleanCloud(request);
@@ -71,6 +88,20 @@ export async function POST(request: Request, context: RouteContext) {
   const path = (await context.params).path;
   const route = path.join("/");
 
+  if (path[0] === "web") {
+    try {
+      if (!path.slice(1).join("/").startsWith("logout")) {
+        const auth = await resolveWebSession(request);
+        await requireWebCsrf(request, auth.webSessionId);
+      }
+      return await handleWebPost(request, path.slice(1)) ?? notFound();
+    } catch (error) { return webRouteError(error); }
+  }
+  if (!["webhooks/paddle", "service/auth/magic-link", "service/auth/oauth/start", "service/auth/refresh"].includes(route)) {
+    try { await protectCookieWrite(request); }
+    catch (error) { return webRouteError(error); }
+  }
+
   if (route === "service/auth/magic-link") return sendMagicLink(request);
   if (route === "service/auth/refresh") return refreshSession(request);
   if (route === "service/auth/logout") return logout(request);
@@ -87,8 +118,20 @@ export async function POST(request: Request, context: RouteContext) {
   return notFound();
 }
 
+export async function PATCH(request: Request, context: RouteContext) {
+  const path = (await context.params).path;
+  if (path[0] !== "web") return notFound();
+  try {
+    const auth = await resolveWebSession(request);
+    await requireWebCsrf(request, auth.webSessionId);
+    return await handleWebPatch(request, path.slice(1)) ?? notFound();
+  } catch (error) { return webRouteError(error); }
+}
+
 export async function DELETE(request: Request, context: RouteContext) {
   const path = (await context.params).path;
+  try { await protectCookieWrite(request); }
+  catch (error) { return webRouteError(error); }
   if (path.length === 4 && path.slice(0, 3).join("/") === "service/auth/identities") {
     return deleteAuthIdentity(request, { params: Promise.resolve({ id: path[3] }) });
   }
